@@ -1,0 +1,30 @@
+from __future__ import annotations
+from typing import List, Optional, Dict
+from uuid import uuid4, UUID
+from sqlmodel import SQLModel, Field
+from sqlalchemy import Column, JSON
+
+
+class Restaurant(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str
+    location: Optional[str] = None
+    tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+
+
+class MenuItem(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    restaurant_id: UUID = Field(index=True)
+    name: str
+    description: str = ""
+    ingredients: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    allergens: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    dietary_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    cuisine: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    price: Optional[float] = None
+    spice_level: Optional[int] = None
+    cooking_method: Optional[str] = None
+    course: Optional[str] = None
+    features: Dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON))
+    provenance: Dict = Field(default_factory=dict, sa_column=Column(JSON))
+    inference_confidence: float = 1.0

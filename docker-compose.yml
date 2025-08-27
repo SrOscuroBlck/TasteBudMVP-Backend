@@ -1,0 +1,17 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: tastebud_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tastebud
+      POSTGRES_USER: tastebud
+      POSTGRES_PASSWORD: tastebud
+    ports:
+      - "5432:5432"
+    volumes:
+      - tastebud_pg_data:/var/lib/postgresql/data
+volumes:
+  tastebud_pg_data:
+    driver: local
