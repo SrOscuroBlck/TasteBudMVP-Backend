@@ -31,6 +31,11 @@ env/
 *.sqlite
 *.sqlite3
 
+# --- Model files & indexes ---
+data/faiss_indexes/
+data/*.joblib
+data/*.index
+
 # --- Testing & coverage ---
 .pytest_cache/
 .coverage

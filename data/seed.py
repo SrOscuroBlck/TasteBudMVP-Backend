@@ -1,4 +1,11 @@
 from uuid import uuid4
+from pathlib import Path
+import sys
+
+# Ensure project root is on sys.path so `from models import ...` works whether this
+# script is run inside the container or from the repository root.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from sqlmodel import Session
 from models import Restaurant, MenuItem, PopulationStats, User
 from config.database import engine, create_db_and_tables

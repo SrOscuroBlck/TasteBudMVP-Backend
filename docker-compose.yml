@@ -1,8 +1,9 @@
 version: "3.9"
+
 services:
-  db:
-    image: postgres:15-alpine
-    container_name: tastebud_db
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tastebud_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: tastebud
@@ -12,6 +13,55 @@ services:
       - "5432:5432"
     volumes:
       - tastebud_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tastebud"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tastebud_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - tastebud_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tastebud_api
+    restart: unless-stopped
+    environment:
+      - TASTEBUD_DATABASE_URL=postgresql+psycopg2://tastebud:tastebud@postgres:5432/tastebud
+      - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - HOST=0.0.0.0
+      - PORT=8010
+      - DEBUG=true
+      - ALLOWED_ORIGINS=*
+    ports:
+      - "8010:8010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    command: uvicorn main:app --host 0.0.0.0 --port 8010 --reload
+
 volumes:
   tastebud_pg_data:
+    driver: local
+  tastebud_redis_data:
     driver: local

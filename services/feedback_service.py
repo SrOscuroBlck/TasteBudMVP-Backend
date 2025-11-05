@@ -13,6 +13,8 @@ class FeedbackService:
     def add_rating(self, session: Session, user: User, item_id: str, rating: int, liked: bool, reasons: List[str], comment: str = "") -> Rating:
         from uuid import UUID
         item = session.get(MenuItem, UUID(item_id))
+        if not item:
+            raise ValueError(f"MenuItem {item_id} not found")
         r = Rating(user_id=user.id, item_id=item.id, rating=rating, liked=liked, reasons=",".join(reasons), comment=comment)
         session.add(r)
         self._apply_learning(user, item, liked or rating >= 4, rating <= 2, reasons)
@@ -25,6 +27,8 @@ class FeedbackService:
     def add_interaction(self, session: Session, user: User, item_id: str, type_: str) -> Interaction:
         from uuid import UUID
         it = session.get(MenuItem, UUID(item_id))
+        if not it:
+            raise ValueError(f"MenuItem {item_id} not found")
         inter = Interaction(user_id=user.id, item_id=it.id, type=type_)  # type: ignore[arg-type]
         session.add(inter)
         session.commit()

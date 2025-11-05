@@ -3,12 +3,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pathlib import Path
-from config import settings, create_db_and_tables
+from sqlalchemy import text
+from config import settings, create_db_and_tables, engine
 from routes.api import router as api_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Enable pgvector extension before creating tables
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+    
+    # Create all tables (auto-sync models)
     create_db_and_tables()
     yield
 

@@ -118,6 +118,13 @@ def create_restaurant(payload: Dict[str, Any], session: Session = Depends(get_se
     return {"id": str(r.id), "name": r.name}
 
 
+@router.get("/restaurants")
+def list_restaurants(session: Session = Depends(get_session)):
+    """Return a list of restaurants (id, name, location, tags)."""
+    rows = session.exec(select(Restaurant)).all()
+    return [{"id": str(r.id), "name": r.name, "location": r.location, "tags": r.tags} for r in rows]
+
+
 @router.get("/recommendations")
 def recommendations(user_id: UUID, restaurant_id: Optional[UUID] = None, top_n: int = 10, budget: Optional[float] = None, time_of_day: Optional[str] = None, session: Session = Depends(get_session)):
     user = session.get(User, user_id)

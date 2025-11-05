@@ -1,8 +1,10 @@
 from __future__ import annotations
 from typing import List, Optional, Dict
 from uuid import uuid4, UUID
+from datetime import datetime
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, JSON
+from pgvector.sqlalchemy import Vector
 
 
 class Restaurant(SQLModel, table=True):
@@ -28,3 +30,9 @@ class MenuItem(SQLModel, table=True):
     features: Dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON))
     provenance: Dict = Field(default_factory=dict, sa_column=Column(JSON))
     inference_confidence: float = 1.0
+    
+    embedding: Optional[List[float]] = Field(default=None, sa_column=Column(Vector(1536)))
+    reduced_embedding: Optional[List[float]] = Field(default=None, sa_column=Column(Vector(64)))
+    embedding_model: Optional[str] = None
+    embedding_version: Optional[str] = None
+    last_embedded_at: Optional[datetime] = None

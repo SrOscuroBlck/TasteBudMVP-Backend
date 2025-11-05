@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from sqlmodel import Session, select
 from models import User, MenuItem, PopulationStats
 from .features import cosine_similarity, has_allergen, violates_diet
@@ -9,7 +9,7 @@ import math
 from datetime import datetime
 
 
-def time_decay_score(ts: datetime, half_life_days: int) -> float:
+def time_decay_score(ts: Optional[datetime], half_life_days: int) -> float:
     if not ts:
         return 1.0
     days = (datetime.utcnow() - ts).days
@@ -17,7 +17,7 @@ def time_decay_score(ts: datetime, half_life_days: int) -> float:
 
 
 class RecommendationService:
-    def recommend(self, session: Session, user: User, restaurant_id: str = None, top_n: int = 10, budget: float = None, time_of_day: str = None) -> Dict[str, Any]:
+    def recommend(self, session: Session, user: User, restaurant_id: Optional[str] = None, top_n: int = 10, budget: Optional[float] = None, time_of_day: Optional[str] = None) -> Dict[str, Any]:
         # 1) candidates
         q = select(MenuItem)
         if restaurant_id:
