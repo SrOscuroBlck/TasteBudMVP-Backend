@@ -1,0 +1,12 @@
+{
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": false,
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    ".venv",
+    "venv"
+  ]
+}

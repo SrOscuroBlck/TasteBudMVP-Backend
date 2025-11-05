@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any
+from typing import Dict, Any, cast
 from config.settings import settings
 
 
@@ -23,8 +23,10 @@ def generate_onboarding_question(context: Dict[str, Any]) -> Dict[str, Any]:
     )
     msg = [{"role": "system", "content": sys}, {"role": "user", "content": str(context)}]
     try:
-        r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=msg, temperature=0.5, max_tokens=250)
-        txt = r.choices[0].message.content.strip()
+        # The OpenAI client expects a specific message param type; cast to Any to satisfy type checkers
+        r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=cast(Any, msg), temperature=0.5, max_tokens=250)
+        content = r.choices[0].message.content or ""
+        txt = content.strip()
         import json
         data = json.loads(txt)
         # minimal validation
@@ -42,9 +44,11 @@ def generate_rationale(context: Dict[str, Any]) -> str:
     sys = "Return JSON like {\"reason\": \"...\"} based on provided matched axes and key ingredients."
     msg = [{"role": "system", "content": sys}, {"role": "user", "content": str(context)}]
     try:
-        r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=msg, temperature=0.6, max_tokens=60)
+        # cast messages to Any to avoid strict SDK typing issues in editor
+        r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=cast(Any, msg), temperature=0.6, max_tokens=60)
         import json
-        txt = r.choices[0].message.content.strip()
+        content = r.choices[0].message.content or ""
+        txt = content.strip()
         data = json.loads(txt)
         return data.get("reason", "")
     except Exception:
@@ -61,9 +65,10 @@ def infer_ingredients(context: Dict[str, Any]) -> Dict[str, Any]:
     )
     msg = [{"role": "system", "content": sys}, {"role": "user", "content": str(context)}]
     try:
-        r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=msg, temperature=0.5, max_tokens=200)
+        r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=cast(Any, msg), temperature=0.5, max_tokens=200)
         import json
-        data = json.loads(r.choices[0].message.content.strip())
+        content = r.choices[0].message.content or ""
+        data = json.loads(content.strip())
         if "candidates" in data:
             return data
     except Exception:

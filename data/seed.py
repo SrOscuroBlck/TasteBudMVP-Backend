@@ -1,8 +1,18 @@
 from uuid import uuid4
+from pathlib import Path
+import sys
+
+# Ensure project root is on sys.path so `from models import ...` works whether this
+# script is run inside the container or from the repository root.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from sqlmodel import Session
 from models import Restaurant, MenuItem, PopulationStats, User
 from config.database import engine, create_db_and_tables
 from services.features import build_item_features
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 def seed():
@@ -38,7 +48,7 @@ def seed():
         s.add(u1); s.add(u2)
 
         s.commit()
-        print("Seeded restaurants, menu items, priors, and users.")
+        logger.info("Database seeded successfully", extra={"restaurants": 2, "menu_items": 4, "users": 2})
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, List
+from typing import Dict, List, Optional
 import math
 
 
@@ -88,7 +88,7 @@ def violates_diet(dietary_rules: List[str], item_tags: List[str]) -> bool:
     return False
 
 
-def has_allergen(allergies: List[str], ingredients: List[str], explicit_allergens: List[str] = None) -> bool:
+def has_allergen(allergies: List[str], ingredients: List[str], explicit_allergens: Optional[List[str]] = None) -> bool:
     alls = set(map(str.lower, allergies))
     if explicit_allergens:
         if any(a.lower() in alls for a in explicit_allergens):
