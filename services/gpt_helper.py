@@ -25,7 +25,7 @@ def generate_onboarding_question(context: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # The OpenAI client expects a specific message param type; cast to Any to satisfy type checkers
         r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=cast(Any, msg), temperature=0.5, max_tokens=250)
-        content = getattr(r.choices[0].message, "content", "") or ""
+        content = r.choices[0].message.content or ""
         txt = content.strip()
         import json
         data = json.loads(txt)
@@ -47,7 +47,7 @@ def generate_rationale(context: Dict[str, Any]) -> str:
         # cast messages to Any to avoid strict SDK typing issues in editor
         r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=cast(Any, msg), temperature=0.6, max_tokens=60)
         import json
-        content = getattr(r.choices[0].message, "content", "") or ""
+        content = r.choices[0].message.content or ""
         txt = content.strip()
         data = json.loads(txt)
         return data.get("reason", "")
@@ -67,7 +67,7 @@ def infer_ingredients(context: Dict[str, Any]) -> Dict[str, Any]:
     try:
         r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=cast(Any, msg), temperature=0.5, max_tokens=200)
         import json
-        content = getattr(r.choices[0].message, "content", "") or ""
+        content = r.choices[0].message.content or ""
         data = json.loads(content.strip())
         if "candidates" in data:
             return data
