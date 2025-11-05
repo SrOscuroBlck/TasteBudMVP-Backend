@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Optional
 from sqlmodel import Session, select
 from models import User, MenuItem, PopulationStats
 from .features import cosine_similarity, has_allergen, violates_diet
