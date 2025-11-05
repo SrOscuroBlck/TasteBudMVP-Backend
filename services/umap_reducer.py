@@ -56,9 +56,21 @@ class UMAPReducer:
         """
         Fit and transform in one step.
         """
-        self.fit(embeddings)
-        return self.transform(embeddings)
-    
+        if len(embeddings) < self.n_components:
+            raise ValueError(f"Need at least {self.n_components} embeddings to fit UMAP")
+        X = np.array(embeddings, dtype=np.float32)
+        self.reducer = umap.UMAP(
+            n_components=self.n_components,
+            metric='cosine',
+            random_state=self.random_state,
+            n_neighbors=15,
+            min_dist=0.1,
+            verbose=True
+        )
+        reduced = self.reducer.fit_transform(X)
+        self.is_fitted = True
+        reduced_array = np.asarray(reduced, dtype=np.float32)
+        return reduced_array.tolist()
     def save(self, path: str) -> None:
         """Save fitted UMAP model to disk"""
         if not self.is_fitted:
