@@ -69,4 +69,6 @@ class UMAPReducer:
         """Load fitted UMAP model from disk"""
         import joblib
         self.reducer = joblib.load(path)
+        if self.reducer.n_components != self.n_components:
+            raise ValueError(f'Loaded reducer has {self.reducer.n_components} components, expected {self.n_components}')
         self.is_fitted = True
