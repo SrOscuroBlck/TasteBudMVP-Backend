@@ -1,6 +1,5 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-import openai
 from openai import OpenAI
 import numpy as np
 
