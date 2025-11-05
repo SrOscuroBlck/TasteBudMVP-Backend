@@ -23,6 +23,14 @@ class EmbeddingService:
             self._sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
         return self._sentence_model
     
+    def _normalize_embedding_dimension(self, embedding: np.ndarray) -> List[float]:
+        if embedding.size < self.embedding_dim:
+            pad_width = self.embedding_dim - embedding.size
+            embedding = np.pad(embedding, (0, pad_width))
+        else:
+            embedding = embedding[:self.embedding_dim]
+        return embedding.tolist()
+    
     def generate_text_for_item(self, item: Dict[str, Any]) -> str:
         parts = []
         
@@ -73,20 +81,9 @@ class EmbeddingService:
     def generate_embedding_local(self, text: str) -> List[float]:
         """Generate embedding using local sentence-transformers model"""
         model = self._get_sentence_model()
-        # sentence-transformers may return an ndarray or a list-like of tensors depending on version
         embedding = model.encode(text, convert_to_numpy=True)
-
-        # Ensure we have a numpy array (handles list[Tensor] cases safely)
         embedding = np.asarray(embedding, dtype=np.float32)
-
-        # Pad or truncate to match OpenAI dimensions for consistency
-        if embedding.size < self.embedding_dim:
-            pad_width = self.embedding_dim - embedding.size
-            embedding = np.pad(embedding, (0, pad_width))
-        else:
-            embedding = embedding[:self.embedding_dim]
-
-        return embedding.tolist()
+        return self._normalize_embedding_dimension(embedding)
     
     def generate_embedding(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -134,20 +131,9 @@ class EmbeddingService:
         """Generate embeddings for multiple texts using local model"""
         model = self._get_sentence_model()
         embeddings = model.encode(texts, convert_to_numpy=True)
-        
         embeddings = np.asarray(embeddings, dtype=np.float32)
         
-        # Pad or truncate each embedding to match OpenAI dimensions
-        processed = []
-        for embedding in embeddings:
-            if embedding.size < self.embedding_dim:
-                pad_width = self.embedding_dim - embedding.size
-                embedding = np.pad(embedding, (0, pad_width))
-            else:
-                embedding = embedding[:self.embedding_dim]
-            processed.append(embedding.tolist())
-        
-        return processed
+        return [self._normalize_embedding_dimension(embedding) for embedding in embeddings]
     
     def generate_batch(self, items: List[Dict[str, Any]], batch_size: int = 100) -> List[Optional[Dict[str, Any]]]:
         """
