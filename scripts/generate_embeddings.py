@@ -61,8 +61,8 @@ def generate_embeddings_for_all_items():
 def reduce_embeddings_for_all_items():
     with Session(engine) as session:
         statement = select(MenuItem).where(
-            MenuItem.embedding != None,
-            MenuItem.reduced_embedding == None
+            MenuItem.embedding.is_not(None),
+            MenuItem.reduced_embedding.is_(None)
         )
         items = session.exec(statement).all()
         
