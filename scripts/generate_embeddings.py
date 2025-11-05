@@ -20,7 +20,7 @@ def generate_embeddings_for_all_items():
     embedding_service = EmbeddingService()
     
     with Session(engine) as session:
-        statement = select(MenuItem).where(MenuItem.embedding == None)
+        statement = select(MenuItem).where(MenuItem.embedding.is_(None))
         items = session.exec(statement).all()
         
         if not items:
