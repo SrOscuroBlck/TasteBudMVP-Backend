@@ -32,9 +32,10 @@ def generate_embeddings_for_all_items():
         
         logger.info("Starting embedding generation", extra={"item_count": len(items)})
         
-        for i, item in enumerate(items, 1):
-            # Convert to dict
-            item_dict = {
+        # Convert all items to dict format for batch processing
+        items_dicts = []
+        for item in items:
+            items_dicts.append({
                 "name": item.name,
                 "description": item.description,
                 "ingredients": item.ingredients,
@@ -43,22 +44,26 @@ def generate_embeddings_for_all_items():
                 "dietary_tags": item.dietary_tags,
                 "course": item.course,
                 "spice_level": item.spice_level,
-            }
-            
-            result = embedding_service.generate_embedding(item_dict)
-            
+            })
+        
+        # Generate embeddings in batches (default batch_size=100)
+        results = embedding_service.generate_batch(items_dicts)
+        
+        # Apply results to items
+        success_count = 0
+        for item, result in zip(items, results):
             if result:
                 item.embedding = result["embedding"]
                 item.embedding_model = result["embedding_model"]
                 item.embedding_version = result["embedding_version"]
                 item.last_embedded_at = result["last_embedded_at"]
                 session.add(item)
-                logger.info("Generated embedding", extra={"item_id": str(item.id), "item_name": item.name, "progress": f"{i}/{len(items)}"})
+                success_count += 1
             else:
-                logger.error("Failed to generate embedding", extra={"item_id": str(item.id), "item_name": item.name, "progress": f"{i}/{len(items)}"})
+                logger.error("Failed to generate embedding", extra={"item_id": str(item.id), "item_name": item.name})
         
         session.commit()
-        logger.info("Completed embedding generation", extra={"item_count": len(items)})
+        logger.info("Completed embedding generation", extra={"item_count": len(items), "success_count": success_count})
 
 
 def reduce_embeddings_for_all_items():
