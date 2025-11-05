@@ -275,7 +275,7 @@ Goal: Set up vector database foundation and embeddings pipeline
 ```txt
 # Vector DB & Embeddings
 psycopg2-binary==2.9.9
-pgvector==0.2.3
+pgvector==0.2.4
 sentence-transformers==2.2.2  # or use OpenAI embeddings API
 umap-learn==0.5.5
 
