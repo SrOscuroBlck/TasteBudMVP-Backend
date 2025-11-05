@@ -112,17 +112,70 @@ class EmbeddingService:
             "source_text": text
         }
     
+    def generate_batch_openai(self, texts: List[str]) -> Optional[List[List[float]]]:
+        """Generate embeddings for multiple texts in one OpenAI API call"""
+        if not self.client:
+            return None
+        
+        try:
+            response = self.client.embeddings.create(
+                input=texts,
+                model=self.model
+            )
+            return [item.embedding for item in response.data]
+        except Exception as e:
+            print(f"OpenAI batch embedding error: {e}")
+            return None
+    
+    def generate_batch_local(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for multiple texts using local model"""
+        model = self._get_sentence_model()
+        embeddings = model.encode(texts, convert_to_numpy=True)
+        
+        embeddings = np.asarray(embeddings, dtype=np.float32)
+        
+        # Pad or truncate each embedding to match OpenAI dimensions
+        processed = []
+        for embedding in embeddings:
+            if embedding.size < self.embedding_dim:
+                pad_width = self.embedding_dim - embedding.size
+                embedding = np.pad(embedding, (0, pad_width))
+            else:
+                embedding = embedding[:self.embedding_dim]
+            processed.append(embedding.tolist())
+        
+        return processed
+    
     def generate_batch(self, items: List[Dict[str, Any]], batch_size: int = 100) -> List[Optional[Dict[str, Any]]]:
         """
         Generate embeddings for multiple items in batches.
+        Uses true batch processing - one API call per batch instead of N individual calls.
         More efficient for large datasets.
         """
         results = []
         
         for i in range(0, len(items), batch_size):
             batch = items[i:i + batch_size]
-            for item in batch:
-                result = self.generate_embedding(item)
-                results.append(result)
+            texts = [self.generate_text_for_item(item) for item in batch]
+            
+            # Try OpenAI batch API first
+            embeddings = self.generate_batch_openai(texts)
+            model_used = self.model
+            
+            # Fallback to local batch processing
+            if embeddings is None:
+                embeddings = self.generate_batch_local(texts)
+                model_used = "sentence-transformers/all-MiniLM-L6-v2"
+            
+            # Convert embeddings to result dictionaries
+            timestamp = datetime.utcnow()
+            for embedding, text in zip(embeddings, texts):
+                results.append({
+                    "embedding": embedding,
+                    "embedding_model": model_used,
+                    "embedding_version": "1.0",
+                    "last_embedded_at": timestamp,
+                    "source_text": text
+                })
         
         return results
