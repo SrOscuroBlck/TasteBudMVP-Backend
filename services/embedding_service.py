@@ -4,6 +4,9 @@ from openai import OpenAI
 import numpy as np
 
 from config.settings import settings
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class EmbeddingService:
@@ -64,7 +67,7 @@ class EmbeddingService:
             )
             return response.data[0].embedding
         except Exception as e:
-            print(f"OpenAI embedding error: {e}")
+            logger.warning("OpenAI embedding failed, will use fallback", extra={"error": str(e), "model": self.model})
             return None
     
     def generate_embedding_local(self, text: str) -> List[float]:
@@ -124,7 +127,7 @@ class EmbeddingService:
             )
             return [item.embedding for item in response.data]
         except Exception as e:
-            print(f"OpenAI batch embedding error: {e}")
+            logger.warning("OpenAI batch embedding failed, will use fallback", extra={"error": str(e), "batch_size": len(texts), "model": self.model})
             return None
     
     def generate_batch_local(self, texts: List[str]) -> List[List[float]]:

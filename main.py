@@ -6,18 +6,28 @@ from pathlib import Path
 from sqlalchemy import text
 from config import settings, create_db_and_tables, engine
 from routes.api import router as api_router
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Starting application lifespan")
+    
     # Enable pgvector extension before creating tables
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
+    logger.info("Enabled pgvector extension")
     
     # Create all tables (auto-sync models)
     create_db_and_tables()
+    logger.info("Database tables synchronized")
+    
     yield
+    
+    logger.info("Application shutdown complete")
 
 
 app = FastAPI(title="TasteBud API", version="0.1.0", debug=settings.DEBUG, lifespan=lifespan)

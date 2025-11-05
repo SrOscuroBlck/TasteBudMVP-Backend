@@ -14,6 +14,9 @@ from config.database import engine
 from models.restaurant import MenuItem
 from services.embedding_service import EmbeddingService
 from services.umap_reducer import UMAPReducer
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 def generate_embeddings_for_all_items():
@@ -24,10 +27,10 @@ def generate_embeddings_for_all_items():
         items = session.exec(statement).all()
         
         if not items:
-            print("✓ All items already have embeddings")
+            logger.info("All items already have embeddings")
             return
         
-        print(f"Generating embeddings for {len(items)} items...")
+        logger.info("Starting embedding generation", extra={"item_count": len(items)})
         
         for i, item in enumerate(items, 1):
             # Convert to dict
@@ -50,12 +53,12 @@ def generate_embeddings_for_all_items():
                 item.embedding_version = result["embedding_version"]
                 item.last_embedded_at = result["last_embedded_at"]
                 session.add(item)
-                print(f"  [{i}/{len(items)}] ✓ {item.name}")
+                logger.info("Generated embedding", extra={"item_id": str(item.id), "item_name": item.name, "progress": f"{i}/{len(items)}"})
             else:
-                print(f"  [{i}/{len(items)}] ✗ Failed: {item.name}")
+                logger.error("Failed to generate embedding", extra={"item_id": str(item.id), "item_name": item.name, "progress": f"{i}/{len(items)}"})
         
         session.commit()
-        print(f"\n✓ Generated embeddings for {len(items)} items")
+        logger.info("Completed embedding generation", extra={"item_count": len(items)})
 
 
 def reduce_embeddings_for_all_items():
@@ -67,10 +70,10 @@ def reduce_embeddings_for_all_items():
         items = session.exec(statement).all()
         
         if not items:
-            print("✓ All items already have reduced embeddings")
+            logger.info("All items already have reduced embeddings")
             return
         
-        print(f"\nReducing embeddings for {len(items)} items using UMAP...")
+        logger.info("Starting UMAP dimensionality reduction", extra={"item_count": len(items)})
         
         # Filter out any items that somehow have a None embedding; UMAP expects a List[List[float]]
         filtered = [(item, item.embedding) for item in items if item.embedding is not None]
@@ -79,14 +82,12 @@ def reduce_embeddings_for_all_items():
         reducer = UMAPReducer(n_components=64)
 
         if len(embeddings) < 64:
-            print(f"  ⚠ Only {len(embeddings)} items. UMAP works best with more data.")
-            print("  Skipping dimensionality reduction for now.")
-            print("  Will use full embeddings for FAISS.")
+            logger.warning("Insufficient items for UMAP reduction, skipping", extra={"item_count": len(embeddings), "minimum_required": 64})
             return
         reduced = reducer.fit_transform(embeddings)
 
         reducer.save("data/umap_reducer.joblib")
-        print("  ✓ Saved UMAP reducer to data/umap_reducer.joblib")
+        logger.info("Saved UMAP reducer model", extra={"path": "data/umap_reducer.joblib"})
 
         # Map reduced embeddings back to the original items that had embeddings
         for (item, _orig_embedding), reduced_embedding in zip(filtered, reduced):
@@ -94,24 +95,17 @@ def reduce_embeddings_for_all_items():
             session.add(item)
         
         session.commit()
-        print(f"✓ Reduced embeddings for {len(items)} items")
+        logger.info("Completed dimensionality reduction", extra={"item_count": len(items)})
 
 
 def main():
-    print("=" * 60)
-    print("EMBEDDING GENERATION PIPELINE")
-    print("=" * 60)
+    logger.info("Starting embedding generation pipeline")
     
     generate_embeddings_for_all_items()
     
     reduce_embeddings_for_all_items()
     
-    print("\n" + "=" * 60)
-    print("COMPLETE")
-    print("=" * 60)
-    print("\nNext steps:")
-    print("  1. Build FAISS index: python scripts/build_faiss_index.py")
-    print("  2. Test recommendations with new embeddings")
+    logger.info("Embedding generation pipeline complete")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,9 @@ from services.onboarding_service import OnboardingService
 from services.menu_service import MenuService
 from services.recommendation_service import RecommendationService
 from services.feedback_service import FeedbackService
+from utils.logger import setup_logger
 
+logger = setup_logger(__name__)
 
 router = APIRouter()
 
@@ -28,10 +30,13 @@ class OnboardingStartBody(BaseModel):
 def onboarding_start(body: OnboardingStartBody, session: Session = Depends(get_session)):
     user = session.get(User, body.user_id)
     if not user:
-        user = User(id=body.user_id)  # create if new
+        user = User(id=body.user_id)
         session.add(user)
         session.commit()
         session.refresh(user)
+        logger.info("Created new user", extra={"user_id": str(body.user_id)})
+    
+    logger.info("Starting onboarding", extra={"user_id": str(body.user_id)})
     svc = OnboardingService()
     return svc.start(user, session)
 
@@ -42,10 +47,16 @@ def onboarding_answer(payload: Dict[str, Any], session: Session = Depends(get_se
         user_id = UUID(payload["user_id"])  # type: ignore[arg-type]
         user = session.get(User, user_id)
         if not user:
+            logger.warning("User not found for onboarding answer", extra={"user_id": str(user_id)})
             raise HTTPException(404, "user not found")
+        
+        logger.info("Processing onboarding answer", extra={"user_id": str(user_id), "question_id": payload.get("question_id")})
         svc = OnboardingService()
         return svc.answer(user, payload["question_id"], payload["chosen_option_id"], session)
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error("Error processing onboarding answer", extra={"error": str(e)}, exc_info=True)
         raise HTTPException(400, str(e))
 
 
@@ -92,8 +103,10 @@ def update_prefs(user_id: UUID, payload: Dict[str, Any], session: Session = Depe
 
 @router.post("/restaurants/{restaurant_id}/menu/ingest")
 def ingest_menu(restaurant_id: UUID, items: List[Dict[str, Any]], session: Session = Depends(get_session)):
+    logger.info("Ingesting menu items", extra={"restaurant_id": str(restaurant_id), "item_count": len(items)})
     svc = MenuService()
     up = svc.ingest(session, restaurant_id, items)
+    logger.info("Menu ingestion complete", extra={"restaurant_id": str(restaurant_id), "ingested_count": len(up)})
     return {"count": len(up)}
 
 
@@ -129,9 +142,14 @@ def list_restaurants(session: Session = Depends(get_session)):
 def recommendations(user_id: UUID, restaurant_id: Optional[UUID] = None, top_n: int = 10, budget: Optional[float] = None, time_of_day: Optional[str] = None, session: Session = Depends(get_session)):
     user = session.get(User, user_id)
     if not user:
+        logger.warning("User not found for recommendations", extra={"user_id": str(user_id)})
         raise HTTPException(404, "user not found")
+    
+    logger.info("Generating recommendations", extra={"user_id": str(user_id), "restaurant_id": str(restaurant_id) if restaurant_id else None, "top_n": top_n})
     svc = RecommendationService()
-    return svc.recommend(session, user, str(restaurant_id) if restaurant_id else None, top_n, budget, time_of_day)
+    result = svc.recommend(session, user, str(restaurant_id) if restaurant_id else None, top_n, budget, time_of_day)
+    logger.info("Recommendations generated", extra={"user_id": str(user_id), "result_count": len(result) if isinstance(result, list) else 0})
+    return result
 
 
 @router.post("/discovery/quick-like")
@@ -151,11 +169,16 @@ def quick_like(payload: Dict[str, Any], session: Session = Depends(get_session))
 @router.post("/feedback/rating")
 def post_rating(payload: Dict[str, Any], session: Session = Depends(get_session)):
     from uuid import UUID as _UUID
-    user = session.get(User, _UUID(payload["user_id"]))
+    user_id = _UUID(payload["user_id"])
+    user = session.get(User, user_id)
     if not user:
+        logger.warning("User not found for feedback rating", extra={"user_id": str(user_id)})
         raise HTTPException(404, "user not found")
+    
+    logger.info("Recording feedback rating", extra={"user_id": str(user_id), "item_id": payload.get("item_id"), "rating": payload.get("rating")})
     svc = FeedbackService()
     r = svc.add_rating(session, user, payload["item_id"], int(payload["rating"]), bool(payload["liked"]), payload.get("reasons", []), payload.get("comment", ""))
+    logger.info("Feedback rating recorded", extra={"user_id": str(user_id), "rating_id": str(r.id)})
     return {"id": str(r.id)}
 
 
