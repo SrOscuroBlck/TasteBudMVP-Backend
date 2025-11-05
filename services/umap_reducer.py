@@ -42,13 +42,15 @@ class UMAPReducer:
         Transform embeddings to reduced dimensionality.
         Requires fit() to be called first.
         """
-        if not self.is_fitted:
+        if not self.is_fitted or self.reducer is None:
             raise ValueError("UMAP reducer not fitted. Call fit() first.")
         
         X = np.array(embeddings, dtype=np.float32)
         reduced = self.reducer.transform(X)
         
-        return reduced.tolist()
+        # UMAP may return sparse matrix or ndarray; ensure we get ndarray and convert to list
+        reduced_array = np.asarray(reduced, dtype=np.float32)
+        return reduced_array.tolist()
     
     def fit_transform(self, embeddings: List[List[float]]) -> List[List[float]]:
         """
@@ -69,6 +71,4 @@ class UMAPReducer:
         """Load fitted UMAP model from disk"""
         import joblib
         self.reducer = joblib.load(path)
-        if self.reducer.n_components != self.n_components:
-            raise ValueError(f'Loaded reducer has {self.reducer.n_components} components, expected {self.n_components}')
         self.is_fitted = True

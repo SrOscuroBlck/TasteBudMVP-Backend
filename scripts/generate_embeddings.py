@@ -20,7 +20,7 @@ def generate_embeddings_for_all_items():
     embedding_service = EmbeddingService()
     
     with Session(engine) as session:
-        statement = select(MenuItem).where(MenuItem.embedding.is_(None))
+        statement = select(MenuItem).where(MenuItem.embedding == None)
         items = session.exec(statement).all()
         
         if not items:
@@ -61,8 +61,8 @@ def generate_embeddings_for_all_items():
 def reduce_embeddings_for_all_items():
     with Session(engine) as session:
         statement = select(MenuItem).where(
-            MenuItem.embedding.is_not(None),
-            MenuItem.reduced_embedding.is_(None)
+            MenuItem.embedding != None,
+            MenuItem.reduced_embedding == None
         )
         items = session.exec(statement).all()
         
