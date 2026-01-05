@@ -88,7 +88,7 @@ def build_faiss_index(dimension: int = 64, index_name: str = "current"):
         )
         
         print(f"[INFO] Index built successfully")
-        print(f"[INFO] Saving index to data/faiss_indexes/{index_name}.faiss")
+        print(f"[INFO] Saving index to data/faiss_indexes/{index_name}_{dimension}d.faiss")
         
         service.save(index_name)
         
