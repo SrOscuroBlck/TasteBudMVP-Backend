@@ -26,7 +26,7 @@ Create `.env` in the project root (see `.env.example`):
 ```
 TASTEBUD_DATABASE_URL=sqlite:///./tastebud.db
 OPENAI_API_KEY=sk-... # optional; required to exercise GPT-assisted features
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5-nano
 HOST=0.0.0.0
 PORT=8010
 DEBUG=true

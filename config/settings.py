@@ -14,7 +14,7 @@ class Settings:
 
     # OpenAI (bounded usage)
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")

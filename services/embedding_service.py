@@ -12,7 +12,7 @@ logger = setup_logger(__name__)
 class EmbeddingService:
     
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+        self.client = OpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None 
         self.model = "text-embedding-3-small"
         self.embedding_dim = 1536
         self._sentence_model = None

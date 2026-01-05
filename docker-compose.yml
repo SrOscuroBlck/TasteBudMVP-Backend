@@ -43,7 +43,7 @@ services:
       - TASTEBUD_DATABASE_URL=postgresql+psycopg2://tastebud:tastebud@postgres:5432/tastebud
       - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-nano}
       - HOST=0.0.0.0
       - PORT=8010
       - DEBUG=true
