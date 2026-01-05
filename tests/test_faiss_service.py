@@ -190,8 +190,6 @@ class TestFAISSService:
         service.save("test_dimension")
         
         new_service = FAISSService()
-        import shutil
-        from pathlib import Path
         
         test_64d_path = Path("data/faiss_indexes/test_dimension_64d.faiss")
         test_128d_path = Path("data/faiss_indexes/test_dimension_128d.faiss")
