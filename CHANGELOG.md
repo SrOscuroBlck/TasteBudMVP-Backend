@@ -2,6 +2,53 @@
 
 All notable changes to the TasteBud recommendation system.
 
+## [Phase 1.2] - 2026-01-04
+
+### Added - Fast Similarity Search with FAISS
+
+#### FAISSService
+- **FAISSService** (`services/faiss_service.py`)
+  - Fast k-nearest neighbor search using FAISS IndexFlatIP
+  - Build index from embeddings with automatic vector normalization
+  - Persistent storage to `data/faiss_indexes/` directory
+  - Support for both 64D (reduced) and 1536D (full) embeddings
+  - Index metadata tracking (dimension, count, build timestamp, version)
+  - UUID mapping for MenuItem ID preservation
+  - Fail-fast validation with clear error messages
+  
+#### Performance Characteristics
+- **Build Time**: <1 second for 10K items
+- **Query Time**: 
+  - 64D embeddings: <5ms average for 10K items
+  - 1536D embeddings: <20ms average for 1K items
+- **Accuracy**: Exact search with normalized vectors for cosine similarity
+- **Memory**: Efficient in-memory index with disk persistence
+
+#### Testing
+- Comprehensive unit test suite (`tests/test_faiss_service.py`)
+  - 24 test cases covering happy path and edge cases
+  - Build, save/load, search functionality
+  - Error handling (empty embeddings, dimension mismatch, missing files)
+  - Performance benchmarks for 10K and 100K item datasets
+- Integration test with real MenuItem data (`tests/test_faiss_integration.py`)
+  - End-to-end validation with database queries
+  - Round-trip save/load verification
+  - Similarity search accuracy validation
+
+#### Configuration
+- Added `FAISS_INDEX_PATH` setting to `config/settings.py`
+  - Default: `data/faiss_indexes/`
+  - Configurable via environment variable
+
+#### Scripts
+- **build_faiss_index.py** - Build FAISS index from database embeddings
+  - Support for both 64D and 1536D embeddings
+  - Configurable index naming
+  - Automatic validation with test query
+  - Usage: `python scripts/build_faiss_index.py [dimension] [index_name]`
+
+---
+
 ## [Phase 1.1.1] - 2026-01-04
 
 ### Changed
