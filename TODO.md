@@ -13,11 +13,11 @@ Priority tasks for completing the TasteBud neural hybrid recommendation system.
   - [x] Index versioning and metadata
 
 ### FAISS Scripts
-- [ ] Create `scripts/build_faiss_index.py`
-  - [ ] Load all MenuItems with embeddings
-  - [ ] Build index (prefer reduced_embedding if available)
-  - [ ] Save to `data/faiss_indexes/current.faiss`
-  - [ ] Print build stats and performance metrics
+- [x] Create `scripts/build_faiss_index.py`
+  - [x] Load all MenuItems with embeddings
+  - [x] Build index (prefer reduced_embedding if available)
+  - [x] Save to `data/faiss_indexes/current.faiss`
+  - [x] Print build stats and performance metrics
 
 ### API Endpoints
 - [ ] Add `GET /api/v1/items/{item_id}/similar`

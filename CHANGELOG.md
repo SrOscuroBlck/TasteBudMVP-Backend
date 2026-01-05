@@ -40,6 +40,13 @@ All notable changes to the TasteBud recommendation system.
   - Default: `data/faiss_indexes/`
   - Configurable via environment variable
 
+#### Scripts
+- **build_faiss_index.py** - Build FAISS index from database embeddings
+  - Support for both 64D and 1536D embeddings
+  - Configurable index naming
+  - Automatic validation with test query
+  - Usage: `python scripts/build_faiss_index.py [dimension] [index_name]`
+
 ---
 
 ## [Phase 1.1.1] - 2026-01-04
