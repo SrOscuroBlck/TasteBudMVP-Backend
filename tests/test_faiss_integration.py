@@ -1,4 +1,3 @@
-from uuid import uuid4
 from datetime import datetime
 from sqlmodel import Session, select
 import numpy as np
