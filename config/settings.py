@@ -39,5 +39,8 @@ class Settings:
     # Popularity
     DECAY_HALF_LIFE_DAYS: int = int(os.getenv("DECAY_HALF_LIFE_DAYS", "30"))
 
+    # FAISS
+    FAISS_INDEX_PATH: str = os.getenv("FAISS_INDEX_PATH", "data/faiss_indexes/")
+
 
 settings = Settings()
