@@ -184,7 +184,7 @@ class FAISSService:
         if self.metadata is None:
             raise ValueError("cannot search: metadata is missing")
 
-        if not query_embedding:
+        if query_embedding is None or len(query_embedding) == 0:
             raise ValueError("query_embedding cannot be empty")
 
         query_array = np.array([query_embedding], dtype=np.float32)
