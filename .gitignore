@@ -49,3 +49,6 @@ logs/
 
 # --- Node/npm (if any UI assets get added later) ---
 node_modules/
+
+# --- Issue tracking ---
+ISSUES/
