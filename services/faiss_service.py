@@ -7,7 +7,6 @@ import time
 
 import numpy as np
 import faiss
-import joblib
 
 from config.settings import settings
 from utils.logger import setup_logger
