@@ -1,4 +1,3 @@
-from datetime import datetime
 from sqlmodel import Session, select
 import numpy as np
 import time
