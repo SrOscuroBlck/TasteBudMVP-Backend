@@ -1,5 +1,4 @@
 from sqlmodel import Session, select
-from datetime import datetime
 import sys
 
 from config.database import engine
