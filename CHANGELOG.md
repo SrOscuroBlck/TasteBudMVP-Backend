@@ -43,9 +43,17 @@ All notable changes to the TasteBud recommendation system.
 #### Scripts
 - **build_faiss_index.py** - Build FAISS index from database embeddings
   - Support for both 64D and 1536D embeddings
-  - Configurable index naming
+  - Configurable index naming (default: 'current')
   - Automatic validation with test query
+  - Docker container execution support with sys.path handling
+  - Comprehensive build statistics (items indexed, build time, index size)
+  - Clear error messages for missing embeddings
   - Usage: `python scripts/build_faiss_index.py [dimension] [index_name]`
+  - Example: `docker-compose exec api python scripts/build_faiss_index.py 1536`
+
+#### Bug Fixes
+- Fixed embedding validation in build script to handle numpy arrays from pgvector
+- Fixed FAISSService.search validation to properly check list/array types
 
 ---
 
