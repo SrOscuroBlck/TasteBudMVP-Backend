@@ -1,6 +1,5 @@
 from uuid import uuid4, UUID
 from pathlib import Path
-import shutil
 import time
 import numpy as np
 import pytest
