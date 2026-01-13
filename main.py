@@ -6,6 +6,7 @@ from pathlib import Path
 from sqlalchemy import text
 from config import settings, create_db_and_tables, engine
 from routes.api import router as api_router
+from services.faiss_service import FAISSService
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -24,6 +25,19 @@ async def lifespan(app: FastAPI):
     # Create all tables (auto-sync models)
     create_db_and_tables()
     logger.info("Database tables synchronized")
+    
+    # Load FAISS index for similarity search
+    faiss_service = FAISSService()
+    try:
+        faiss_service.load(index_name="current", dimension=64)
+        logger.info("FAISS index loaded successfully", extra={"dimension": 64, "count": faiss_service.index_size})
+        app.state.faiss_service = faiss_service
+    except FileNotFoundError:
+        logger.warning("FAISS index not found, similarity search will be unavailable")
+        app.state.faiss_service = None
+    except Exception as e:
+        logger.error("Failed to load FAISS index", extra={"error": str(e)}, exc_info=True)
+        app.state.faiss_service = None
     
     yield
     
