@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 from pydantic import BaseModel
@@ -191,3 +191,110 @@ def post_interaction(payload: Dict[str, Any], session: Session = Depends(get_ses
     svc = FeedbackService()
     inter = svc.add_interaction(session, user, payload["item_id"], payload["type"])
     return {"id": str(inter.id)}
+
+
+@router.get("/items/{item_id}/similar")
+def get_similar_items(
+    item_id: UUID,
+    request: Request,
+    session: Session = Depends(get_session),
+    k: int = 10,
+    cuisine: Optional[str] = None,
+    max_price: Optional[float] = None,
+    dietary: Optional[str] = None,
+    explain: bool = False
+):
+    if not request.app.state.faiss_service:
+        raise HTTPException(
+            status_code=503,
+            detail="FAISS index not available. Run scripts/build_faiss_index.py to build the index."
+        )
+    
+    item = session.get(MenuItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="item not found")
+    
+    if item.reduced_embedding is None and item.embedding is None:
+        raise HTTPException(
+            status_code=400,
+            detail="item has no embedding. Run scripts/generate_embeddings.py to generate embeddings."
+        )
+    
+    query_embedding = item.reduced_embedding if item.reduced_embedding is not None else item.embedding
+    
+    if query_embedding is None:
+        raise HTTPException(status_code=400, detail="item embedding is None")
+    
+    faiss_service = request.app.state.faiss_service
+    
+    candidate_k = k * 3
+    similar_results = faiss_service.search(query_embedding, k=candidate_k)
+    
+    similar_item_ids = [result[0] for result in similar_results if result[0] != item_id]
+    
+    similar_items_query = select(MenuItem).where(MenuItem.id.in_(similar_item_ids))
+    similar_items_db = session.exec(similar_items_query).all()
+    
+    items_map = {item.id: item for item in similar_items_db}
+    scores_map = {result[0]: result[1] for result in similar_results}
+    
+    filtered_items = []
+    for similar_id in similar_item_ids:
+        similar_item = items_map.get(similar_id)
+        if not similar_item:
+            continue
+        
+        if cuisine and cuisine not in similar_item.cuisine:
+            continue
+        
+        if max_price is not None and similar_item.price is not None and similar_item.price > max_price:
+            continue
+        
+        if dietary:
+            if dietary not in similar_item.dietary_tags:
+                continue
+        
+        filtered_items.append({
+            "item": similar_item,
+            "score": scores_map.get(similar_id, 0.0)
+        })
+    
+    filtered_items = filtered_items[:k]
+    
+    result_items = []
+    for item_data in filtered_items:
+        similar_item = item_data["item"]
+        result_items.append({
+            "id": str(similar_item.id),
+            "name": similar_item.name,
+            "description": similar_item.description,
+            "price": similar_item.price,
+            "cuisine": similar_item.cuisine,
+            "dietary_tags": similar_item.dietary_tags,
+            "similarity_score": round(item_data["score"], 4)
+        })
+    
+    logger.info(
+        "Similar items retrieved",
+        extra={
+            "item_id": str(item_id),
+            "candidates": len(similar_results),
+            "filtered": len(result_items),
+            "filters_applied": {"cuisine": cuisine, "max_price": max_price, "dietary": dietary}
+        }
+    )
+    
+    return {
+        "item_id": str(item_id),
+        "item_name": item.name,
+        "similar_items": result_items,
+        "metadata": {
+            "total_candidates": len(similar_results),
+            "filtered_count": len(result_items),
+            "filters_applied": {
+                "cuisine": cuisine,
+                "max_price": max_price,
+                "dietary": dietary
+            }
+        }
+    }
