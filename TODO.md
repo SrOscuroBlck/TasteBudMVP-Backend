@@ -20,11 +20,12 @@ Priority tasks for completing the TasteBud neural hybrid recommendation system.
   - [x] Print build stats and performance metrics
 
 ### API Endpoints
-- [ ] Add `GET /api/v1/items/{item_id}/similar`
-  - [ ] Load FAISS index
-  - [ ] Query for k-nearest neighbors
-  - [ ] Return MenuItem objects with distances
-  - [ ] Optional filters (cuisine, dietary, budget)
+- [x] Add `GET /api/v1/items/{item_id}/similar`
+  - [x] Load FAISS index
+  - [x] Query for k-nearest neighbors
+  - [x] Return MenuItem objects with distances
+  - [x] Optional filters (cuisine, dietary, budget)
+  - [x] Optional GPT explanations with `explain=true`
 
 ### Index Maintenance
 - [ ] Implement index refresh strategy
