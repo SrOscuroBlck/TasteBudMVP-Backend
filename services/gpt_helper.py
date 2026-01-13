@@ -74,3 +74,33 @@ def infer_ingredients(context: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def explain_similarity(original_item: str, similar_item: str, cuisine: list, score: float) -> str:
+    client = _client()
+    if not client:
+        return ""
+    
+    context = {
+        "original": original_item,
+        "similar": similar_item,
+        "cuisine": cuisine,
+        "score": score
+    }
+    
+    sys = "Explain in one concise sentence why these dishes are similar. Focus on flavors, ingredients, or cooking style. Return JSON with 'explanation' field."
+    msg = [{"role": "system", "content": sys}, {"role": "user", "content": str(context)}]
+    
+    try:
+        r = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=cast(Any, msg),
+            temperature=0.6,
+            max_tokens=50
+        )
+        import json
+        content = r.choices[0].message.content or ""
+        data = json.loads(content.strip())
+        return data.get("explanation", "")
+    except Exception:
+        return ""

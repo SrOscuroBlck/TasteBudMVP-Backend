@@ -10,6 +10,7 @@ from services.onboarding_service import OnboardingService
 from services.menu_service import MenuService
 from services.recommendation_service import RecommendationService
 from services.feedback_service import FeedbackService
+from services.gpt_helper import explain_similarity
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -264,7 +265,7 @@ def get_similar_items(
     result_items = []
     for item_data in filtered_items:
         similar_item = item_data["item"]
-        result_items.append({
+        item_result = {
             "id": str(similar_item.id),
             "name": similar_item.name,
             "description": similar_item.description,
@@ -272,7 +273,19 @@ def get_similar_items(
             "cuisine": similar_item.cuisine,
             "dietary_tags": similar_item.dietary_tags,
             "similarity_score": round(item_data["score"], 4)
-        })
+        }
+        
+        if explain and len(result_items) < 3:
+            explanation = explain_similarity(
+                original_item=item.name,
+                similar_item=similar_item.name,
+                cuisine=similar_item.cuisine,
+                score=item_data["score"]
+            )
+            if explanation:
+                item_result["explanation"] = explanation
+        
+        result_items.append(item_result)
     
     logger.info(
         "Similar items retrieved",

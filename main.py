@@ -28,16 +28,26 @@ async def lifespan(app: FastAPI):
     
     # Load FAISS index for similarity search
     faiss_service = FAISSService()
+    index_loaded = False
+    
     try:
         faiss_service.load(index_name="current", dimension=64)
         logger.info("FAISS index loaded successfully", extra={"dimension": 64, "count": faiss_service.index_size})
-        app.state.faiss_service = faiss_service
+        index_loaded = True
     except FileNotFoundError:
-        logger.warning("FAISS index not found, similarity search will be unavailable")
-        app.state.faiss_service = None
+        logger.info("64D FAISS index not found, trying 1536D fallback")
+        try:
+            faiss_service.load(index_name="current", dimension=1536)
+            logger.info("FAISS index loaded successfully", extra={"dimension": 1536, "count": faiss_service.index_size})
+            index_loaded = True
+        except FileNotFoundError:
+            logger.warning("FAISS index not found, similarity search will be unavailable")
+        except Exception as e:
+            logger.error("Failed to load 1536D FAISS index", extra={"error": str(e)}, exc_info=True)
     except Exception as e:
-        logger.error("Failed to load FAISS index", extra={"error": str(e)}, exc_info=True)
-        app.state.faiss_service = None
+        logger.error("Failed to load 64D FAISS index", extra={"error": str(e)}, exc_info=True)
+    
+    app.state.faiss_service = faiss_service if index_loaded else None
     
     yield
     
