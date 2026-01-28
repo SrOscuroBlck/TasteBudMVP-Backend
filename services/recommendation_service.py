@@ -4,9 +4,15 @@ from sqlmodel import Session, select
 from models import User, MenuItem, PopulationStats
 from .features import cosine_similarity, has_allergen, violates_diet
 from .gpt_helper import generate_rationale
+from .retrieval_service import RetrievalService
+from .reranking_service import RerankingService, RecommendationContext
+from .explanation_service import ExplanationService
 from config.settings import settings
 import math
 from datetime import datetime
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 def time_decay_score(ts: Optional[datetime], half_life_days: int) -> float:
@@ -17,8 +23,156 @@ def time_decay_score(ts: Optional[datetime], half_life_days: int) -> float:
 
 
 class RecommendationService:
-    def recommend(self, session: Session, user: User, restaurant_id: Optional[str] = None, top_n: int = 10, budget: Optional[float] = None, time_of_day: Optional[str] = None) -> Dict[str, Any]:
-        # 1) candidates
+    def __init__(self, use_new_pipeline: bool = True):
+        self.use_new_pipeline = use_new_pipeline
+        self.retrieval_service = RetrievalService() if use_new_pipeline else None
+        self.reranking_service = None
+        self.explanation_service = ExplanationService() if use_new_pipeline else None
+    
+    def recommend(
+        self,
+        session: Session,
+        user: User,
+        restaurant_id: Optional[str] = None,
+        top_n: int = 10,
+        budget: Optional[float] = None,
+        time_of_day: Optional[str] = None,
+        mood: Optional[str] = None,
+        occasion: Optional[str] = None
+    ) -> Dict[str, Any]:
+        if self.use_new_pipeline:
+            return self._recommend_new_pipeline(
+                session, user, restaurant_id, top_n,
+                budget, time_of_day, mood, occasion
+            )
+        else:
+            return self._recommend_legacy(
+                session, user, restaurant_id, top_n,
+                budget, time_of_day
+            )
+    
+    def _recommend_new_pipeline(
+        self,
+        session: Session,
+        user: User,
+        restaurant_id: Optional[str],
+        top_n: int,
+        budget: Optional[float],
+        time_of_day: Optional[str],
+        mood: Optional[str],
+        occasion: Optional[str]
+    ) -> Dict[str, Any]:
+        logger.info(
+            "Generating recommendations with new pipeline",
+            extra={
+                "user_id": str(user.id),
+                "restaurant_id": restaurant_id,
+                "top_n": top_n
+            }
+        )
+        
+        try:
+            candidates = self.retrieval_service.retrieve_candidates(
+                session=session,
+                user=user,
+                k=max(top_n * 3, 30),
+                restaurant_id=restaurant_id,
+                budget=budget
+            )
+        except Exception as e:
+            logger.error(
+                "Retrieval failed, falling back to legacy",
+                extra={"error": str(e)},
+                exc_info=True
+            )
+            return self._recommend_legacy(
+                session, user, restaurant_id, top_n, budget, time_of_day
+            )
+        
+        if not candidates:
+            return {"items": [], "warnings": ["no_safe_items"]}
+        
+        pop_stats = session.exec(select(PopulationStats)).first()
+        if not self.reranking_service:
+            self.reranking_service = RerankingService(population_stats=pop_stats)
+        
+        context = RecommendationContext(
+            time_of_day=time_of_day,
+            budget=budget,
+            mood=mood,
+            occasion=occasion
+        )
+        
+        ranked_items = self.reranking_service.rerank(
+            candidates=candidates,
+            user=user,
+            context=context,
+            top_n=top_n
+        )
+        
+        context_dict = {
+            "time_of_day": time_of_day,
+            "budget": budget,
+            "mood": mood,
+            "occasion": occasion
+        }
+        explanations = self.explanation_service.generate_explanations(
+            ranked_items=ranked_items,
+            user=user,
+            context=context_dict
+        )
+        
+        results = []
+        for ranked_item, explanation in zip(ranked_items, explanations):
+            item = ranked_item.item
+            user_sorted = sorted(
+                user.taste_vector.items(),
+                key=lambda kv: kv[1],
+                reverse=True
+            )
+            matched = [
+                k for k, v in user_sorted
+                if item.features.get(k, 0.0) > 0.5
+            ][:3]
+            
+            results.append({
+                "item_id": str(item.id),
+                "name": item.name,
+                "score": round(ranked_item.final_score, 3),
+                "matched_axes": matched,
+                "reason": explanation,
+                "safety_flags": [],
+                "cuisine": item.cuisine,
+                "price": item.price,
+                "confidence": ranked_item.confidence,
+                "provenance": {
+                    "source": item.provenance.get("source", "ingested"),
+                    "inference_confidence": item.inference_confidence
+                },
+                "ranking_factors": {
+                    k: round(v, 3)
+                    for k, v in ranked_item.ranking_factors.items()
+                }
+            })
+        
+        logger.info(
+            "Recommendations generated successfully",
+            extra={"user_id": str(user.id), "result_count": len(results)}
+        )
+        
+        return {"items": results}
+    
+    def _recommend_legacy(
+        self,
+        session: Session,
+        user: User,
+        restaurant_id: Optional[str],
+        top_n: int,
+        budget: Optional[float],
+        time_of_day: Optional[str]
+    ) -> Dict[str, Any]:
+        logger.info("Using legacy recommendation pipeline")
+        
         q = select(MenuItem)
         if restaurant_id:
             from uuid import UUID

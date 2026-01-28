@@ -140,16 +140,49 @@ def list_restaurants(session: Session = Depends(get_session)):
 
 
 @router.get("/recommendations")
-def recommendations(user_id: UUID, restaurant_id: Optional[UUID] = None, top_n: int = 10, budget: Optional[float] = None, time_of_day: Optional[str] = None, session: Session = Depends(get_session)):
+def recommendations(
+    user_id: UUID,
+    restaurant_id: Optional[UUID] = None,
+    top_n: int = 10,
+    budget: Optional[float] = None,
+    time_of_day: Optional[str] = None,
+    mood: Optional[str] = None,
+    occasion: Optional[str] = None,
+    session: Session = Depends(get_session)
+):
     user = session.get(User, user_id)
     if not user:
         logger.warning("User not found for recommendations", extra={"user_id": str(user_id)})
         raise HTTPException(404, "user not found")
     
-    logger.info("Generating recommendations", extra={"user_id": str(user_id), "restaurant_id": str(restaurant_id) if restaurant_id else None, "top_n": top_n})
+    logger.info(
+        "Generating recommendations",
+        extra={
+            "user_id": str(user_id),
+            "restaurant_id": str(restaurant_id) if restaurant_id else None,
+            "top_n": top_n,
+            "mood": mood,
+            "occasion": occasion
+        }
+    )
     svc = RecommendationService()
-    result = svc.recommend(session, user, str(restaurant_id) if restaurant_id else None, top_n, budget, time_of_day)
-    logger.info("Recommendations generated", extra={"user_id": str(user_id), "result_count": len(result) if isinstance(result, list) else 0})
+    result = svc.recommend(
+        session,
+        user,
+        str(restaurant_id) if restaurant_id else None,
+        top_n,
+        budget,
+        time_of_day,
+        mood,
+        occasion
+    )
+    logger.info(
+        "Recommendations generated",
+        extra={
+            "user_id": str(user_id),
+            "result_count": len(result.get("items", [])) if isinstance(result, dict) else 0
+        }
+    )
     return result
 
 
@@ -309,5 +342,161 @@ def get_similar_items(
                 "max_price": max_price,
                 "dietary": dietary
             }
+        }
+    }
+
+
+@router.get("/items/{item_id}")
+def get_item_details(item_id: UUID, session: Session = Depends(get_session)):
+    item = session.get(MenuItem, item_id)
+    if not item:
+        logger.warning("Item not found", extra={"item_id": str(item_id)})
+        raise HTTPException(404, "item not found")
+    
+    restaurant = session.get(Restaurant, item.restaurant_id)
+    
+    logger.info("Item details retrieved", extra={"item_id": str(item_id)})
+    
+    return {
+        "id": str(item.id),
+        "restaurant_id": str(item.restaurant_id),
+        "restaurant_name": restaurant.name if restaurant else None,
+        "name": item.name,
+        "description": item.description,
+        "ingredients": item.ingredients,
+        "allergens": item.allergens,
+        "dietary_tags": item.dietary_tags,
+        "cuisine": item.cuisine,
+        "price": item.price,
+        "spice_level": item.spice_level,
+        "cooking_method": item.cooking_method,
+        "course": item.course,
+        "features": item.features,
+        "provenance": item.provenance,
+        "inference_confidence": item.inference_confidence
+    }
+
+
+@router.get("/restaurants/{restaurant_id}")
+def get_restaurant_details(restaurant_id: UUID, session: Session = Depends(get_session)):
+    restaurant = session.get(Restaurant, restaurant_id)
+    if not restaurant:
+        logger.warning("Restaurant not found", extra={"restaurant_id": str(restaurant_id)})
+        raise HTTPException(404, "restaurant not found")
+    
+    menu_items = session.exec(
+        select(MenuItem).where(MenuItem.restaurant_id == restaurant_id)
+    ).all()
+    
+    menu_count = len(menu_items)
+    
+    cuisines = set()
+    price_range = {"min": None, "max": None}
+    dietary_options = set()
+    
+    for item in menu_items:
+        cuisines.update(item.cuisine)
+        dietary_options.update(item.dietary_tags)
+        
+        if item.price is not None:
+            if price_range["min"] is None or item.price < price_range["min"]:
+                price_range["min"] = item.price
+            if price_range["max"] is None or item.price > price_range["max"]:
+                price_range["max"] = item.price
+    
+    logger.info(
+        "Restaurant details retrieved",
+        extra={"restaurant_id": str(restaurant_id), "menu_count": menu_count}
+    )
+    
+    return {
+        "id": str(restaurant.id),
+        "name": restaurant.name,
+        "location": restaurant.location,
+        "tags": restaurant.tags,
+        "menu_count": menu_count,
+        "cuisines": sorted(list(cuisines)),
+        "price_range": price_range,
+        "dietary_options": sorted(list(dietary_options))
+    }
+
+
+@router.get("/search")
+def search_items(
+    q: Optional[str] = None,
+    cuisine: Optional[str] = None,
+    dietary: Optional[str] = None,
+    max_price: Optional[float] = None,
+    min_price: Optional[float] = None,
+    restaurant_id: Optional[UUID] = None,
+    limit: int = 50,
+    session: Session = Depends(get_session)
+):
+    query = select(MenuItem)
+    
+    if restaurant_id:
+        query = query.where(MenuItem.restaurant_id == restaurant_id)
+    
+    items = session.exec(query).all()
+    
+    filtered_items = []
+    for item in items:
+        if q and q.lower() not in item.name.lower() and q.lower() not in (item.description or "").lower():
+            continue
+        
+        if cuisine and cuisine not in item.cuisine:
+            continue
+        
+        if dietary and dietary not in item.dietary_tags:
+            continue
+        
+        if max_price is not None and item.price is not None and item.price > max_price:
+            continue
+        
+        if min_price is not None and item.price is not None and item.price < min_price:
+            continue
+        
+        filtered_items.append(item)
+    
+    filtered_items = filtered_items[:limit]
+    
+    results = []
+    for item in filtered_items:
+        restaurant = session.get(Restaurant, item.restaurant_id)
+        results.append({
+            "id": str(item.id),
+            "name": item.name,
+            "description": item.description,
+            "restaurant_id": str(item.restaurant_id),
+            "restaurant_name": restaurant.name if restaurant else None,
+            "cuisine": item.cuisine,
+            "dietary_tags": item.dietary_tags,
+            "price": item.price,
+            "allergens": item.allergens
+        })
+    
+    logger.info(
+        "Search completed",
+        extra={
+            "query": q,
+            "filters": {
+                "cuisine": cuisine,
+                "dietary": dietary,
+                "price_range": f"{min_price}-{max_price}" if min_price or max_price else None
+            },
+            "result_count": len(results)
+        }
+    )
+    
+    return {
+        "items": results,
+        "count": len(results),
+        "filters_applied": {
+            "query": q,
+            "cuisine": cuisine,
+            "dietary": dietary,
+            "max_price": max_price,
+            "min_price": min_price,
+            "restaurant_id": str(restaurant_id) if restaurant_id else None
         }
     }
