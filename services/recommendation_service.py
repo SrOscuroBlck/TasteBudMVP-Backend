@@ -1,12 +1,20 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
+from uuid import UUID
 from sqlmodel import Session, select
-from models import User, MenuItem, PopulationStats
+from models import User, MenuItem, PopulationStats, RecommendationSession, RecommendationFeedback, UserOrderHistory
 from .features import cosine_similarity, has_allergen, violates_diet
 from .gpt_helper import generate_rationale
 from .retrieval_service import RetrievalService
 from .reranking_service import RerankingService, RecommendationContext
+from .ml_reranking_service import MLRerankingService
 from .explanation_service import ExplanationService
+from .context_enhancement_service import ContextEnhancementService
+from .in_session_learning_service import InSessionLearningService
+from .meal_composition_service import MealCompositionService
+from .explanation_enhancement_service import ExplanationEnhancementService
+from .interaction_history_service import InteractionHistoryService
+from .confidence_service import ConfidenceService
 from config.settings import settings
 import math
 from datetime import datetime
@@ -23,11 +31,19 @@ def time_decay_score(ts: Optional[datetime], half_life_days: int) -> float:
 
 
 class RecommendationService:
-    def __init__(self, use_new_pipeline: bool = True):
+    def __init__(self, use_new_pipeline: bool = True, use_ml_reranking: bool = True):
         self.use_new_pipeline = use_new_pipeline
+        self.use_ml_reranking = use_ml_reranking
         self.retrieval_service = RetrievalService() if use_new_pipeline else None
         self.reranking_service = None
+        self.ml_reranking_service = None
         self.explanation_service = ExplanationService() if use_new_pipeline else None
+        self.context_service = ContextEnhancementService()
+        self.in_session_learning = InSessionLearningService()
+        self.meal_composition = MealCompositionService()
+        self.explanation_enhancement = ExplanationEnhancementService()
+        self.interaction_history_service = InteractionHistoryService()
+        self.confidence_service = ConfidenceService()
     
     def recommend(
         self,
@@ -38,12 +54,13 @@ class RecommendationService:
         budget: Optional[float] = None,
         time_of_day: Optional[str] = None,
         mood: Optional[str] = None,
-        occasion: Optional[str] = None
+        occasion: Optional[str] = None,
+        course_preference: Optional[str] = None
     ) -> Dict[str, Any]:
         if self.use_new_pipeline:
             return self._recommend_new_pipeline(
                 session, user, restaurant_id, top_n,
-                budget, time_of_day, mood, occasion
+                budget, time_of_day, mood, occasion, course_preference
             )
         else:
             return self._recommend_legacy(
@@ -60,14 +77,16 @@ class RecommendationService:
         budget: Optional[float],
         time_of_day: Optional[str],
         mood: Optional[str],
-        occasion: Optional[str]
+        occasion: Optional[str],
+        course_preference: Optional[str] = None
     ) -> Dict[str, Any]:
         logger.info(
             "Generating recommendations with new pipeline",
             extra={
                 "user_id": str(user.id),
                 "restaurant_id": restaurant_id,
-                "top_n": top_n
+                "top_n": top_n,
+                "course_preference": course_preference
             }
         )
         
@@ -93,22 +112,48 @@ class RecommendationService:
             return {"items": [], "warnings": ["no_safe_items"]}
         
         pop_stats = session.exec(select(PopulationStats)).first()
-        if not self.reranking_service:
-            self.reranking_service = RerankingService(population_stats=pop_stats)
         
-        context = RecommendationContext(
-            time_of_day=time_of_day,
-            budget=budget,
-            mood=mood,
-            occasion=occasion
-        )
-        
-        ranked_items = self.reranking_service.rerank(
-            candidates=candidates,
-            user=user,
-            context=context,
-            top_n=top_n
-        )
+        # Use ML reranking if enabled and model available
+        if self.use_ml_reranking:
+            if not self.ml_reranking_service:
+                self.ml_reranking_service = MLRerankingService(population_stats=pop_stats)
+            
+            context = RecommendationContext(
+                time_of_day=time_of_day,
+                budget=budget,
+                mood=mood,
+                occasion=occasion,
+                course_preference=course_preference
+            )
+            
+            logger.info("Using ML reranking service")
+            ranked_items = self.ml_reranking_service.rerank(
+                candidates=candidates,
+                user=user,
+                context=context,
+                session=session,
+                top_n=top_n
+            )
+        else:
+            # Fall back to rule-based reranking
+            if not self.reranking_service:
+                self.reranking_service = RerankingService(population_stats=pop_stats)
+            
+            context = RecommendationContext(
+                time_of_day=time_of_day,
+                budget=budget,
+                mood=mood,
+                occasion=occasion,
+                course_preference=course_preference
+            )
+            
+            logger.info("Using rule-based reranking service")
+            ranked_items = self.reranking_service.rerank(
+                candidates=candidates,
+                user=user,
+                context=context,
+                top_n=top_n
+            )
         
         context_dict = {
             "time_of_day": time_of_day,
@@ -275,3 +320,271 @@ class RecommendationService:
             })
 
         return {"items": results}
+    
+    def recommend_with_session(
+        self,
+        session: Session,
+        user: User,
+        recommendation_session: RecommendationSession,
+        top_n: int = 10,
+        iteration: int = 1
+    ) -> Dict[str, Any]:
+        logger.info(
+            "Session-based recommendation starting",
+            extra={
+                "session_id": str(recommendation_session.id),
+                "user_id": str(user.id),
+                "meal_intent": recommendation_session.meal_intent,
+                "iteration": iteration
+            }
+        )
+        
+        from uuid import UUID as UUIDType
+        restaurant_id_str = str(recommendation_session.restaurant_id)
+        
+        q = select(MenuItem).where(MenuItem.restaurant_id == UUIDType(restaurant_id_str))
+        all_items: List[MenuItem] = session.exec(q).all()
+        
+        safe: List[MenuItem] = []
+        user_all = set(map(str.lower, user.allergies))
+        
+        logger.info(
+            "Starting safety filtering",
+            extra={
+                "user_id": str(user.id),
+                "total_items": len(all_items),
+                "permanently_excluded_count": len(user.permanently_excluded_items),
+                "permanently_excluded_items": user.permanently_excluded_items
+            }
+        )
+        
+        for it in all_items:
+            if user_all.intersection(set(map(str.lower, it.allergens))):
+                continue
+            if has_allergen(user.allergies, it.ingredients, explicit_allergens=it.allergens):
+                continue
+            if violates_diet(user.dietary_rules, it.dietary_tags):
+                continue
+            if recommendation_session.budget and it.price and it.price > recommendation_session.budget * 1.2:
+                continue
+            
+            item_id_str = str(it.id)
+            if item_id_str in recommendation_session.excluded_items:
+                continue
+            
+            if item_id_str in user.permanently_excluded_items:
+                logger.debug(
+                    "Item filtered - permanently excluded",
+                    extra={"item_id": item_id_str, "item_name": it.name}
+                )
+                continue
+            
+            safe.append(it)
+        
+        if not safe:
+            return {"items": [], "warnings": ["no_safe_items"]}
+        
+        # Don't apply strict time filtering for full_meal (user wants to see everything)
+        apply_strict_time_filter = recommendation_session.meal_intent != "full_meal"
+        
+        time_filtered = self.context_service.apply_hard_time_filters(
+            safe,
+            recommendation_session.detected_hour,
+            strict=apply_strict_time_filter
+        )
+        
+        intent_filtered = self.context_service.apply_meal_intent_filters(
+            time_filtered,
+            recommendation_session.meal_intent,
+            recommendation_session.hunger_level
+        )
+        
+        order_history = session.exec(
+            select(UserOrderHistory).where(UserOrderHistory.user_id == user.id)
+        ).all()
+        
+        scored_with_penalty = self.context_service.apply_repeat_penalty(
+            intent_filtered,
+            order_history,
+            days_threshold=30
+        )
+        
+        candidates = [item for item, _ in scored_with_penalty]
+        
+        session_feedback = session.exec(
+            select(RecommendationFeedback).where(
+                RecommendationFeedback.session_id == recommendation_session.id
+            )
+        ).all()
+        
+        items_map = {str(item.id): item for item in candidates}
+        
+        profile_adjustments = self.in_session_learning.get_temporary_profile_adjustments(
+            user,
+            session_feedback,
+            items_map
+        )
+        
+        adjusted_taste_vector = user.taste_vector.copy()
+        for axis, adjustment in profile_adjustments["taste_adjustments"].items():
+            adjusted_taste_vector[axis] = max(0.0, min(1.0, adjusted_taste_vector[axis] + adjustment))
+        
+        pop = session.exec(select(PopulationStats)).first()
+        pop_global = pop.item_popularity_global if pop else {}
+        
+        user_interaction_history = self.interaction_history_service.get_all_user_history(
+            db_session=session,
+            user_id=user.id
+        )
+        
+        from .features import clamp01
+        base_scores: Dict[str, float] = {}
+        for it in candidates:
+            s = cosine_similarity(adjusted_taste_vector, it.features)
+            
+            for cuisine, adjustment in profile_adjustments["cuisine_adjustments"].items():
+                if cuisine in it.cuisine:
+                    s += adjustment * settings.LAMBDA_CUISINE
+            
+            popularity_score = pop_global.get(str(it.id), 0.0)
+            s += settings.LAMBDA_POP * popularity_score
+            
+            if recommendation_session.user_experience_level == "new":
+                s += popularity_score * 0.3
+            
+            for item, penalty in scored_with_penalty:
+                if str(item.id) == str(it.id) and penalty < 0:
+                    s += penalty
+                    break
+            
+            novelty_bonus = self.interaction_history_service.calculate_novelty_bonus(
+                user_interaction_history.get(it.id)
+            )
+            s += novelty_bonus * 0.2
+            
+            base_scores[str(it.id)] = max(0.0, min(1.0, s))
+        
+        if recommendation_session.meal_intent == "full_meal":
+            composition_result = self.meal_composition.compose_full_meal(
+                user,
+                candidates,
+                recommendation_session,
+                top_n=max(3, top_n // 3)
+            )
+            
+            if composition_result.compositions:
+                results = []
+                for comp in composition_result.compositions:
+                    explanation = self.explanation_enhancement.generate_multi_course_explanation(
+                        comp,
+                        user,
+                        recommendation_session
+                    )
+                    
+                    results.append({
+                        "composition_id": comp.composition_id,
+                        "items": [
+                            self._format_item_response(session, comp.appetizer, user, recommendation_session, base_scores, order_history, user_interaction_history),
+                            self._format_item_response(session, comp.main, user, recommendation_session, base_scores, order_history, user_interaction_history),
+                            self._format_item_response(session, comp.dessert, user, recommendation_session, base_scores, order_history, user_interaction_history)
+                        ],
+                        "total_price": comp.total_price,
+                        "estimated_duration_minutes": comp.estimated_duration_minutes,
+                        "flavor_harmony_score": comp.flavor_harmony_score,
+                        "explanation": explanation
+                    })
+                
+                return {"items": results, "type": "composition"}
+            
+        sorted_items = sorted(candidates, key=lambda it: base_scores.get(str(it.id), 0.0), reverse=True)
+        top_items = sorted_items[:top_n]
+        
+        for item in top_items:
+            try:
+                self.interaction_history_service.record_item_shown(
+                    db_session=session,
+                    user_id=user.id,
+                    item_id=item.id,
+                    session_id=recommendation_session.id
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to record item view",
+                    extra={
+                        "item_id": str(item.id),
+                        "error": str(e)
+                    }
+                )
+        
+        results = []
+        for idx, it in enumerate(top_items):
+            results.append(self._format_item_response(
+                session, it, user, recommendation_session, base_scores, 
+                order_history, user_interaction_history
+            ))
+        
+        return {"items": results, "type": "single"}
+    
+    def _format_item_response(
+        self,
+        db_session: Session,
+        item: MenuItem,
+        user: User,
+        recommendation_session: RecommendationSession,
+        base_scores: Dict[str, float],
+        order_history: List[UserOrderHistory],
+        user_interaction_history: Dict
+    ) -> Dict[str, Any]:
+        score = base_scores.get(str(item.id), 0.5)
+        
+        confidence, confidence_explanation = self.confidence_service.calculate_recommendation_confidence(
+            db_session=db_session,
+            user=user,
+            item=item,
+            recommendation_session=recommendation_session,
+            base_score=score
+        )
+        
+        novelty_indicator = self.confidence_service.get_novelty_indicator(
+            user_interaction_history.get(item.id)
+        )
+        
+        user_sorted = sorted(user.taste_vector.items(), key=lambda kv: kv[1], reverse=True)
+        matched = [k for k, v in user_sorted if item.features.get(k, 0.0) > 0.5][:3]
+        
+        ranking_factors = {
+            "taste_similarity": score,
+            "course_match": 1.0 if item.course else 0.5
+        }
+        
+        explanation = self.explanation_enhancement.generate_personalized_explanation(
+            item,
+            user,
+            recommendation_session,
+            ranking_factors,
+            order_history,
+            confidence
+        )
+        
+        item_history = user_interaction_history.get(item.id)
+        times_seen_before = item_history.times_shown if item_history else 0
+        
+        return {
+            "item_id": str(item.id),
+            "name": item.name,
+            "description": item.description,
+            "course": item.course,
+            "price": item.price,
+            "score": round(score, 3),
+            "confidence": round(confidence, 2),
+            "confidence_explanation": confidence_explanation,
+            "novelty_indicator": novelty_indicator,
+            "times_seen_before": times_seen_before,
+            "explanation": explanation,
+            "matched_axes": matched,
+            "cuisine": item.cuisine,
+            "dietary_tags": item.dietary_tags,
+            "features": item.features,
+            "safety_confidence": 1.0
+        }
+

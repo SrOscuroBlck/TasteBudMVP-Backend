@@ -97,7 +97,7 @@ All notable changes to the TasteBud recommendation system.
 
 #### LLM Configuration
 - **Updated to GPT-5 nano** as primary model
-  - Model: `gpt-5-nano`
+  - Model: `gpt-5-mini`
   - Pricing: $0.05 input / $0.40 output per 1M tokens
   - 400K context window, 128K max output tokens
   - Fastest and most cost-efficient GPT-5 variant

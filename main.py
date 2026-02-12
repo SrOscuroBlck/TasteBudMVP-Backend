@@ -6,7 +6,13 @@ from pathlib import Path
 from sqlalchemy import text
 from config import settings, create_db_and_tables, engine
 from routes.api import router as api_router
+from routes.ingestion import router as ingestion_router
+from routes.sessions import router as sessions_router
+from routes.feedback import router as feedback_router
 from services.faiss_service import FAISSService
+from scripts.migrate_add_permanently_excluded_items import add_permanently_excluded_items_column
+from scripts.migrate_fix_permanently_excluded_items_type import fix_permanently_excluded_items_type
+from scripts.migrate_add_feedback_indexes import add_feedback_performance_indexes
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -22,9 +28,14 @@ async def lifespan(app: FastAPI):
         conn.commit()
     logger.info("Enabled pgvector extension")
     
-    # Create all tables (auto-sync models)
+    # Create all tables first (handles fresh databases)
     create_db_and_tables()
     logger.info("Database tables synchronized")
+    
+    # Run migrations for existing tables (handles schema updates)
+    add_permanently_excluded_items_column()
+    fix_permanently_excluded_items_type()  # Fix TEXT -> JSONB conversion
+    add_feedback_performance_indexes()
     
     # Load FAISS index for similarity search
     faiss_service = FAISSService()
@@ -65,6 +76,9 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(ingestion_router, prefix="/api/v1")
+app.include_router(sessions_router, prefix="/api/v1")
+app.include_router(feedback_router, prefix="/api/v1")
 
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)

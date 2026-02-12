@@ -40,12 +40,19 @@ class OnboardingState(SQLModel, table=True):
     answered_pairs: List[Dict] = Field(default_factory=list, sa_column=Column(JSON))
     pending_axis_targets: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     confidence: float = 0.0
+    current_question_data: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
 
 
 class User(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    email: str = Field(unique=True, index=True)
+    email_verified: bool = False
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_login: Optional[datetime] = None
+    
+    onboarding_completed: bool = False
 
     allergies: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     dietary_rules: List[str] = Field(default_factory=list, sa_column=Column(JSON))
@@ -55,5 +62,7 @@ class User(SQLModel, table=True):
     taste_vector: Dict[str, float] = Field(default_factory=lambda: {k: 0.5 for k in TASTE_AXES}, sa_column=Column(JSON))
     taste_uncertainty: Dict[str, float] = Field(default_factory=lambda: {k: 0.5 for k in TASTE_AXES}, sa_column=Column(JSON))
     cuisine_affinity: Dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON))
+    
+    permanently_excluded_items: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 
     onboarding_state: Optional[Dict] = Field(default=None, sa_column=Column(JSON))

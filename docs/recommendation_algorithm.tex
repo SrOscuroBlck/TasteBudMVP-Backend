@@ -1,0 +1,624 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{\textbf{TasteBud Recommendation System:\\Mathematical Foundations and Improvement Roadmap}}
+\author{Technical Analysis}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document provides a comprehensive technical analysis of the TasteBud recommendation system, including mathematical formulations of the current algorithm, data structures, learning mechanisms, and a roadmap for systematic improvements. The system employs taste vector matching, contextual filtering, and session-based learning to generate personalized menu recommendations.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{System Overview}
+
+TasteBud is a personalized restaurant menu recommendation system designed to support menu discovery under real-world constraints such as dietary restrictions, time, and budget. Methodologically, the system combines content-based matching with lightweight collaborative signals, contextual gating, and session-based online learning, reflecting the project’s early-stage objective of validating a novel decision process rather than prematurely committing to a single modeling paradigm. The central representation is a user taste profile that is compared to structured item features and augmented by behavioral signals (e.g., popularity and novelty) to balance relevance with exploration. The system is organized as a staged pipeline so that hard constraints (safety and intent) are enforced before expensive scoring and re-ranking steps, which reduces latency while making the decision process auditable. Throughout this document, we emphasize mathematical transparency and modularity, because these properties enable targeted experimentation as new data and product requirements emerge.
+
+\subsection{Core Architecture}
+
+The core architecture is best understood as a sequence of decision layers that progressively refine a broad candidate set into a small set of recommendations. Safety filtering is executed first because it encodes non-negotiable constraints (allergies, dietary restrictions, exclusions, and budget) and therefore defines the feasible recommendation space. Context filtering then tailors feasibility to the current situation (time-of-day and meal intent), which prevents the scoring model from wasting capacity on options that are unlikely to satisfy the user’s current goal. The scoring layer integrates multiple signals into a single ranking objective, after which an optional composition layer constructs multi-course bundles when the intent is a full meal. Finally, session learning closes the loop by incorporating explicit feedback into both short-horizon (within-session) adaptation and longer-horizon profile updates, thereby supporting rapid personalization during early usage when data are sparse.
+
+\begin{figure}[t]
+    \centering
+    \fbox{\parbox{0.92\linewidth}{\vspace{0.6em}\centering
+    \textbf{[Placeholder for architecture diagram]}\\
+    Safety Filter $\rightarrow$ Context Filter $\rightarrow$ Scoring/Re-ranking $\rightarrow$ (Optional) Composition $\rightarrow$ Feedback Update
+    \vspace{0.6em}}}
+    \caption{System architecture of the TasteBud recommendation pipeline.}
+    \label{fig:system-architecture}
+\end{figure}
+
+Figure~\ref{fig:system-architecture} summarizes the end-to-end data flow and clarifies why the system is implemented as a pipeline rather than as a single monolithic model. In particular, separating feasibility constraints (safety and context) from preference estimation (scoring) ensures that constraint satisfaction is guaranteed even when the preference model is still being iterated. The explicit feedback channel is depicted as a return path because it affects both the immediate session state and the persistent user profile, which is critical for bootstrapping personalization in early-stage deployments. This decomposition also creates clear interfaces for experimentation: for example, the scoring stage can be replaced by a learned ranker without modifying the safety logic, and the composition stage can be activated only when the product experience requires structured meal plans. As a result, the architecture directly supports the project goal of exploring a novel recommendation strategy while preserving reliability and interpretability.
+
+\section{Data Structures}
+
+\subsection{User Profile}
+
+The user profile is designed to encode both stable preferences and uncertainty, which is necessary when learning from sparse feedback and evolving behavior. Concretely, the profile stores a taste vector capturing continuous preference intensities, an uncertainty vector capturing confidence in each taste dimension, and a cuisine-affinity map that provides a higher-level prior over regional or stylistic categories. In addition, the representation includes exclusion sets and dietary constraints that function as hard feasibility rules rather than soft preferences. This separation is deliberate: it prevents the model from “trading off” safety against relevance, and it makes it possible to audit and revise constraint logic independently of preference learning. We denote the user representation for user $u$ as the tuple below.
+
+The user profile is designed to encode both stable preferences and uncertainty, which is necessary when learning from sparse feedback and evolving behavior. Concretely, the profile stores a taste vector capturing continuous preference intensities, an uncertainty vector capturing confidence in each taste dimension, and a cuisine-affinity map that provides a higher-level prior over regional or stylistic categories. In addition, the representation includes exclusion sets and dietary constraints that function as hard feasibility rules rather than soft preferences. This separation is deliberate: it prevents the model from “trading off” safety against relevance, and it makes it possible to audit and revise constraint logic independently of preference learning. We denote the user representation for user $u$ as the tuple below.
+
+Each user $u$ is represented by:
+
+\begin{align}
+\mathcal{U} = \{&\mathbf{v}_u, \mathbf{\sigma}_u, \mathbf{c}_u, \mathcal{E}_u, \mathcal{A}_u, \mathcal{D}_u\}
+\end{align}
+
+where:
+\begin{itemize}
+    \item $\mathbf{v}_u \in [0,1]^{10}$ is the \textbf{taste vector} representing preferences across 10 axes:
+    \begin{equation}
+    \mathbf{v}_u = [v_{\text{sweet}}, v_{\text{sour}}, v_{\text{salty}}, v_{\text{bitter}}, v_{\text{umami}}, v_{\text{spicy}}, v_{\text{fatty}}, v_{\text{acidic}}, v_{\text{crunchy}}, v_{\text{hot}}]
+    \end{equation}
+    
+    \item $\mathbf{\sigma}_u \in [0,1]^{10}$ is the \textbf{uncertainty vector} (initially 0.5, decreases with feedback)
+    
+    \item $\mathbf{c}_u : \text{Cuisine} \to [0,1]$ is the \textbf{cuisine affinity map}
+    
+    \item $\mathcal{E}_u = \{i_1, i_2, \ldots, i_k\}$ is the set of \textbf{permanently excluded items}
+    
+    \item $\mathcal{A}_u$ is the set of \textbf{allergens and dietary restrictions}
+    
+    \item $\mathcal{D}_u$ is the \textbf{disliked ingredients set}
+\end{itemize}
+
+The profile components play different roles in downstream decisions. The taste and cuisine components define a soft preference surface that can be optimized against in ranking, whereas the exclusion and dietary components act as binary feasibility constraints enforced upstream in filtering. The uncertainty vector is used to represent epistemic uncertainty: a high value indicates that the system should be cautious about over-committing to that taste dimension and, in later iterations, can be used to guide exploration. Importantly, these design choices reflect early-stage requirements: the representation is expressive enough to capture meaningful structure, yet simple enough to update online and to interpret during debugging and user studies. This balance is essential when developing a novel recommendation approach that must remain explainable to stakeholders.
+
+The profile components play different roles in downstream decisions. The taste and cuisine components define a soft preference surface that can be optimized against in ranking, whereas the exclusion and dietary components act as binary feasibility constraints enforced upstream in filtering. The uncertainty vector is used to represent epistemic uncertainty: a high value indicates that the system should be cautious about over-committing to that taste dimension and, in later iterations, can be used to guide exploration. Importantly, these design choices reflect early-stage requirements: the representation is expressive enough to capture meaningful structure, yet simple enough to update online and to interpret during debugging and user studies. This balance is essential when developing a novel recommendation approach that must remain explainable to stakeholders.
+
+\subsection{Menu Item Representation}
+
+Menu items are represented in a form that supports both structured matching and semantic generalization across free-text descriptions. The structured feature vector $\mathbf{f}_i$ aligns with the user taste vector to enable direct similarity computations, while categorical attributes (cuisines and course type) support context gating and composition. The embedding $\mathbf{e}_i$ provides a dense semantic representation derived from the item’s text, which can be leveraged for diversification, retrieval, and future learned ranking models. Price and popularity are included because practical recommendation quality is shaped not only by preference alignment but also by accessibility and social proof. We denote the full item representation for item $i$ by the tuple below.
+
+Menu items are represented in a form that supports both structured matching and semantic generalization across free-text descriptions. The structured feature vector $\mathbf{f}_i$ aligns with the user taste vector to enable direct similarity computations, while categorical attributes (cuisines and course type) support context gating and composition. The embedding $\mathbf{e}_i$ provides a dense semantic representation derived from the item’s text, which can be leveraged for diversification, retrieval, and future learned ranking models. Price and popularity are included because practical recommendation quality is shaped not only by preference alignment but also by accessibility and social proof. We denote the full item representation for item $i$ by the tuple below.
+
+Each menu item $i$ is characterized by:
+
+\begin{align}
+\mathcal{I} = \{&\mathbf{f}_i, \mathcal{C}_i, p_i, \mathbf{e}_i, g_i, \text{course}_i\}
+\end{align}
+
+where:
+\begin{itemize}
+    \item $\mathbf{f}_i \in [0,1]^{10}$ is the \textbf{feature vector} (same dimensions as taste vector)
+    \item $\mathcal{C}_i$ is the set of cuisines (e.g., \{Italian, Mediterranean\})
+    \item $p_i \in \mathbb{R}^+$ is the price
+    \item $\mathbf{e}_i \in \mathbb{R}^{768}$ is the embedding from \texttt{text-embedding-3-small}
+    \item $g_i \in [0,1]$ is the global popularity score
+    \item $\text{course}_i \in \{\text{appetizer, main, dessert, beverage}\}$
+\end{itemize}
+
+\subsection{Session Context}
+
+Session context captures the transient constraints and behavioral traces that shape recommendations in real time. In particular, meal intent and time-of-day determine which courses are plausible, while budget and time constraints restrict feasible options even when a user’s preferences would otherwise suggest them. The session exclusion set $\mathcal{X}_s$ ensures that skipped items are not immediately re-surfaced, reducing frustration and improving perceived responsiveness. Finally, the feedback history $\mathcal{F}_s$ is treated as an interaction log that supports within-session adaptation and later offline evaluation. Formally, we represent session state $s$ as the tuple below.
+
+Session context captures the transient constraints and behavioral traces that shape recommendations in real time. In particular, meal intent and time-of-day determine which courses are plausible, while budget and time constraints restrict feasible options even when a user’s preferences would otherwise suggest them. The session exclusion set $\mathcal{X}_s$ ensures that skipped items are not immediately re-surfaced, reducing frustration and improving perceived responsiveness. Finally, the feedback history $\mathcal{F}_s$ is treated as an interaction log that supports within-session adaptation and later offline evaluation. Formally, we represent session state $s$ as the tuple below.
+
+A recommendation session $s$ maintains:
+
+\begin{align}
+\mathcal{S} = \{&\text{restaurant}_s, \text{meal\_intent}_s, h_s, t_s, B_s, \mathcal{X}_s, \mathcal{F}_s\}
+\end{align}
+
+where:
+\begin{itemize}
+    \item $\text{meal\_intent}_s \in \{\text{snack, light, full\_meal, main, dessert}\}$
+    \item $h_s \in [0,23]$ is the detected hour
+    \item $t_s \in [0, \infty)$ is time constraint in minutes
+    \item $B_s \in \mathbb{R}^+$ is the budget
+    \item $\mathcal{X}_s$ is the set of \textbf{session-excluded items} (skipped in this session)
+    \item $\mathcal{F}_s = \{(i_j, f_j, c_j, \tau_j)\}$ is the feedback history: item $i_j$, feedback type $f_j$, comment $c_j$, timestamp $\tau_j$
+\end{itemize}
+
+\section{Scoring Function}
+
+\subsection{Base Score Computation}
+
+For a candidate item $i$ and user $u$ with session context $s$, the base score is:
+
+\begin{equation}
+\text{score}(i, u, s) = \alpha \cdot \cos(\mathbf{v}_u', \mathbf{f}_i) + \beta \cdot C(i, u) + \gamma \cdot g_i + \delta \cdot N(i, u) + \epsilon \cdot P(i, u)
+\end{equation}
+
+where:
+
+\subsubsection{Adjusted Taste Vector}
+
+The taste vector is temporarily adjusted during a session:
+
+\begin{equation}
+\mathbf{v}_u' = \mathbf{v}_u + \sum_{(i_j, f_j) \in \mathcal{F}_s} \eta(f_j) \cdot \text{sign}(f_j) \cdot \mathbf{f}_{i_j}
+\end{equation}
+
+where $\eta(f_j)$ is the learning rate for feedback type $f_j$:
+\begin{equation}
+\eta(f_j) = \begin{cases}
+0.15 & \text{if } f_j = \text{SELECTED} \\
+0.10 & \text{if } f_j = \text{DISLIKE} \\
+0.07 & \text{if } f_j = \text{LIKE} \\
+0.07 & \text{if } f_j = \text{SAVE\_FOR\_LATER}
+\end{cases}
+\end{equation}
+
+and $\text{sign}(f_j) = +1$ for positive feedback (LIKE, SELECTED, SAVE) and $-1$ for DISLIKE.
+
+\subsubsection{Cosine Similarity}
+
+\begin{equation}
+\cos(\mathbf{v}_u', \mathbf{f}_i) = \frac{\mathbf{v}_u' \cdot \mathbf{f}_i}{\|\mathbf{v}_u'\| \|\mathbf{f}_i\|}
+\end{equation}
+
+\subsubsection{Cuisine Affinity Bonus}
+
+\begin{equation}
+C(i, u) = \lambda_{\text{cuisine}} \sum_{c \in \mathcal{C}_i} \mathbf{c}_u(c)
+\end{equation}
+
+where $\lambda_{\text{cuisine}} = 0.15$ (from \texttt{settings.LAMBDA\_CUISINE}).
+
+\subsubsection{Popularity Bonus}
+
+\begin{equation}
+\text{Popularity Contribution} = \gamma \cdot g_i
+\end{equation}
+
+with $\gamma = \lambda_{\text{pop}}$ from settings. For new users, add an additional boost:
+
+\begin{equation}
+\text{if } u \text{ is new: } \gamma' = \gamma + 0.3 \cdot g_i
+\end{equation}
+
+\subsubsection{Novelty Bonus}
+
+Based on interaction history $\mathcal{H}_{u,i}$ for user $u$ and item $i$:
+
+\begin{equation}
+N(i, u) = \begin{cases}
+0.3 & \text{if item never shown to user} \\
+0.1 & \text{if shown 1-2 times, no negative feedback} \\
+-0.2 & \text{if dismissed multiple times} \\
+0 & \text{otherwise}
+\end{cases}
+\end{equation}
+
+\subsubsection{Repeat Penalty}
+
+If item $i$ was ordered within the last $\tau_{\text{days}}$ days:
+
+\begin{equation}
+P(i, u) = -0.3 \cdot \exp\left(-\frac{t_{\text{since\_order}}}{\tau_{\text{days}}}\right)
+\end{equation}
+
+where $\tau_{\text{days}} = 30$ is the threshold parameter.
+
+\subsection{Constraint Weights}
+
+Current default values (from codebase inspection):
+\begin{itemize}
+    \item $\alpha = 1.0$ (taste vector weight)
+    \item $\beta = 1.0$ (cuisine weight multiplier)
+    \item $\gamma = \lambda_{\text{pop}}$ (configurable, typically 0.1-0.2)
+    \item $\delta = 0.2$ (novelty weight)
+    \item $\epsilon = 1.0$ (penalty applies directly)
+\end{itemize}
+
+\section{Filtering Pipeline}
+
+\subsection{Safety Filter}
+
+Remove all items $i$ where:
+\begin{equation}
+\begin{aligned}
+&i \in \mathcal{E}_u \quad \text{(permanently excluded)} \\
+\text{OR } &i \in \mathcal{X}_s \quad \text{(session excluded)} \\
+\text{OR } &\text{allergens}(i) \cap \mathcal{A}_u \neq \emptyset \\
+\text{OR } &\text{ingredients}(i) \cap \mathcal{D}_u \neq \emptyset \\
+\text{OR } &p_i > 1.2 \cdot B_s
+\end{aligned}
+\end{equation}
+
+\subsection{Time Filter}
+
+For time $h_s$, define meal period $M(h_s)$:
+
+\begin{equation}
+M(h) = \begin{cases}
+\text{breakfast} & \text{if } 6 \leq h < 11 \\
+\text{lunch} & \text{if } 11 \leq h < 16 \\
+\text{dinner} & \text{if } 16 \leq h < 22 \\
+\text{late\_night} & \text{otherwise}
+\end{cases}
+\end{equation}
+
+If $\text{strict} = \text{True}$ (not used for \texttt{full\_meal}):
+\begin{equation}
+\text{Keep item } i \text{ only if } \text{compatible}(\text{course}_i, M(h_s)) = \text{True}
+\end{equation}
+
+\textbf{Critical Note}: Time filtering is \textbf{disabled} for \texttt{meal\_intent} = \texttt{full\_meal} to allow cross-time-period course selection.
+
+\subsection{Meal Intent Filter}
+
+Map meal intent to allowed courses:
+
+\begin{equation}
+\text{CourseMap}(\text{meal\_intent}) = \begin{cases}
+\{\text{appetizer, main, entree, dinner, dessert}\} & \text{if intent} = \text{full\_meal} \\
+\{\text{main, entree, dinner}\} & \text{if intent} = \text{main} \\
+\{\text{dessert}\} & \text{if intent} = \text{dessert} \\
+\{\text{appetizer, salad, soup}\} & \text{if intent} = \text{snack} \\
+\{\text{appetizer, main}\} & \text{if intent} = \text{light}
+\end{cases}
+\end{equation}
+
+Keep item $i$ if:
+\begin{equation}
+\text{course}_i \in \text{CourseMap}(\text{meal\_intent}_s)
+\end{equation}
+
+\section{Multi-Course Composition Algorithm}
+
+For $\text{meal\_intent} = \text{full\_meal}$, generate 3-course combinations.
+
+\subsection{Course Partitioning}
+
+Split candidates $\mathcal{I}_{\text{filtered}}$ into:
+\begin{align}
+\mathcal{I}_a &= \{i : \text{course}_i \in \{\text{appetizer, starter, salad, soup}\}\} \\
+\mathcal{I}_m &= \{i : \text{course}_i \in \{\text{main, entree, dinner}\}\} \\
+\mathcal{I}_d &= \{i : \text{course}_i \in \{\text{dessert}\}\}
+\end{align}
+
+\subsection{Combination Generation}
+
+Generate all combinations $(a, m, d)$ where $a \in \mathcal{I}_a$, $m \in \mathcal{I}_m$, $d \in \mathcal{I}_d$:
+
+For efficiency, limit to top-scored items:
+\begin{equation}
+\text{Combinations} = \mathcal{I}_a^{(5)} \times \mathcal{I}_m^{(5)} \times \mathcal{I}_d^{(3)}
+\end{equation}
+
+where $\mathcal{I}_x^{(k)}$ denotes top-$k$ items by individual score from set $\mathcal{I}_x$.
+
+\subsection{Harmony Score}
+
+For combination $(a, m, d)$:
+
+\begin{equation}
+H(a, m, d) = w_1 \cdot \phi(\mathbf{f}_a, \mathbf{f}_m) + w_2 \cdot \phi(\mathbf{f}_m, \mathbf{f}_d) + w_3 \cdot \phi(\mathbf{f}_a, \mathbf{f}_d)
+\end{equation}
+
+where $\phi$ is the flavor compatibility function (cosine similarity between feature vectors), and $w_1 = 0.4$, $w_2 = 0.4$, $w_3 = 0.2$ weight course transitions.
+
+\subsection{Diversity Penalty}
+
+Penalize repetition of cooking methods:
+\begin{equation}
+D(a, m, d) = -0.15 \cdot |\text{overlap}(\{\text{method}_a, \text{method}_m, \text{method}_d\})|
+\end{equation}
+
+\subsection{Overall Combination Score}
+
+\begin{equation}
+S_{\text{combo}}(a, m, d) = \frac{\text{score}(a) + 2 \cdot \text{score}(m) + \text{score}(d)}{4} + H(a, m, d) + D(a, m, d)
+\end{equation}
+
+Main course weighted $2\times$ as it's the centerpiece.
+
+Sort combinations by $S_{\text{combo}}$ and return top-3.
+
+\section{Learning Mechanism}
+
+\subsection{Profile Update on Feedback}
+
+When user provides feedback $f$ on item $i$:
+
+\subsubsection{Taste Vector Update}
+
+For each axis $k \in \{1, \ldots, 10\}$:
+
+\begin{equation}
+v_u^{(k)} \leftarrow \text{clamp}_{[0,1]}\left(v_u^{(k)} + \eta(f) \cdot \text{sign}(f) \cdot f_i^{(k)} \cdot \mathbb{1}_{f_i^{(k)} > 0.5}\right)
+\end{equation}
+
+Only update axes where item has strong presence ($f_i^{(k)} > 0.5$).
+
+\subsubsection{Cuisine Affinity Update}
+
+For each cuisine $c \in \mathcal{C}_i$:
+
+\begin{equation}
+\mathbf{c}_u(c) \leftarrow \text{clamp}_{[0,1]}\left(\mathbf{c}_u(c) + \eta(f) \cdot \text{sign}(f) \cdot \rho\right)
+\end{equation}
+
+where $\rho = 1.0$ for positive feedback and $\rho = 0.5$ for negative (cuisine penalty is gentler).
+
+\subsubsection{Uncertainty Reduction}
+
+\begin{equation}
+\sigma_u^{(k)} \leftarrow \max\left(0, \sigma_u^{(k)} - \eta(f) \cdot |f_i^{(k)}|\right)
+\end{equation}
+
+\subsubsection{Permanent Exclusion}
+
+If $f = \text{DISLIKE}$ and intensity is "medium":
+\begin{equation}
+\mathcal{E}_u \leftarrow \mathcal{E}_u \cup \{i\}
+\end{equation}
+
+\textbf{Critical Implementation Note}: Must use \texttt{flag\_modified()} in SQLAlchemy for JSON field updates to persist to database.
+
+\section{Current Issues \& Weaknesses}
+
+\subsection{Identified Problems}
+
+\begin{enumerate}
+    \item \textbf{Feature Vector Quality}: The 10-dimensional taste vectors are manually inferred or populated with unreliable values. No ground truth validation.
+    
+    \item \textbf{Cold Start}: New users start with flat priors ($v_u = 0.5$ everywhere), leading to random recommendations initially.
+    
+    \item \textbf{Cuisine Over-Penalization}: Disliking one Italian dish can tank affinity for all Italian cuisine, even if the dislike was due to a specific ingredient.
+    
+    \item \textbf{No Collaborative Filtering}: System is purely content-based. Ignores wisdom of the crowd (e.g., "users like you also enjoyed X").
+    
+    \item \textbf{Composition Repetition}: Meal compositions can repeat with minor variations (same main + appetizer, different dessert) because scoring is independent per course.
+    
+    \item \textbf{Lack of Diversity in Recommendations}: Top-3 can be very similar items, no explicit diversity enforcement.
+    
+    \item \textbf{Static Weights}: Hyperparameters ($\alpha, \beta, \gamma, \delta$) are hardcoded, not learned from data.
+    
+    \item \textbf{Explanation Quality}: Explanations are template-based, not truly personalized or data-driven.
+    
+    \item \textbf{No Temporal Dynamics}: User preferences may change over time (seasonal, dietary changes), but system treats all feedback equally regardless of recency.
+    
+    \item \textbf{FAISS Underutilization}: Embeddings exist but aren't used for retrieval; scoring is done on all candidates post-filtering.
+\end{enumerate}
+
+\subsection{Performance Bottlenecks}
+
+\begin{itemize}
+    \item Computing scores for all 200+ items per recommendation call
+    \item No caching of user-item scores
+    \item Redundant database queries for rating and interaction history per item (should batch)
+\end{itemize}
+
+\section{Improvement Roadmap}
+
+\subsection{Short-Term Improvements (1-2 weeks)}
+
+\subsubsection{A. Implement Diversity Enforcement}
+
+Use Maximal Marginal Relevance (MMR):
+
+\begin{equation}
+\text{MMR}(i) = \lambda \cdot \text{score}(i) - (1-\lambda) \cdot \max_{j \in \mathcal{R}} \text{sim}(i, j)
+\end{equation}
+
+where $\mathcal{R}$ is the set of already-selected recommendations. Ensures each recommendation is dissimilar from previous ones.
+
+\subsubsection{B. Fix Composition Deduplication}
+
+After selecting a combination $(a_1, m_1, d_1)$, exclude any future combinations sharing $m_1$ or exact pair $(a_1, m_1)$.
+
+\subsubsection{C. Batch Database Queries}
+
+Fetch all user interaction history once, create lookup dict. Reduces queries from $O(n)$ to $O(1)$.
+
+\subsubsection{D. Add Temporal Decay to Feedback}
+
+Weight feedback by recency:
+\begin{equation}
+w_{\text{temporal}}(t) = \exp\left(-\frac{\Delta t}{90 \text{ days}}\right)
+\end{equation}
+
+Recent feedback has $w \approx 1$, 3-month-old feedback has $w \approx 0.37$.
+
+\subsection{Medium-Term Improvements (1-2 months)}
+
+\subsubsection{E. Ingredient-Level Modeling}
+
+Instead of just item-level exclusions, track ingredient preferences:
+\begin{equation}
+\mathcal{L}_u : \text{Ingredient} \to [-1, +1]
+\end{equation}
+
+Aggregate from feedback:
+\begin{equation}
+\mathcal{L}_u(\text{ing}) = \frac{\sum_{i : \text{ing} \in i} \text{sign}(f_i) \cdot \eta(f_i)}{\text{count}(\text{ing})}
+\end{equation}
+
+Use this to understand: "User dislikes \emph{mushrooms}, not Italian food."
+
+\subsubsection{F. Collaborative Filtering Integration}
+
+Build user-item interaction matrix $\mathbf{R} \in \mathbb{R}^{|U| \times |I|}$:
+\begin{equation}
+R_{ui} = \begin{cases}
++1 & \text{if user } u \text{ selected/liked item } i \\
+-1 & \text{if user } u \text{ disliked item } i \\
+0 & \text{no interaction}
+\end{cases}
+\end{equation}
+
+Use matrix factorization or neural collaborative filtering to predict $\hat{R}_{ui}$.
+
+Combine with content score:
+\begin{equation}
+\text{score}_{\text{hybrid}}(i, u) = \lambda_{\text{content}} \cdot \text{score}_{\text{content}}(i, u) + \lambda_{\text{cf}} \cdot \hat{R}_{ui}
+\end{equation}
+
+\subsubsection{G. Learn Feature Projections}
+
+Train a model $\Phi: \text{Embedding} \to \text{TasteVector}$ using supervised data:
+\begin{itemize}
+    \item Input: Item embedding $\mathbf{e}_i \in \mathbb{R}^{768}$
+    \item Output: Predicted taste vector $\hat{\mathbf{f}}_i \in [0,1]^{10}$
+    \item Loss: User feedback as weak supervision
+\end{itemize}
+
+\subsubsection{H. Hyperparameter Tuning}
+
+Use Bayesian optimization or grid search to learn optimal $\alpha, \beta, \gamma, \delta$ by maximizing:
+\begin{equation}
+\text{Objective} = \frac{1}{|\mathcal{S}|} \sum_{s \in \mathcal{S}} \left(\text{CTR}_s + \text{ConversionRate}_s\right)
+\end{equation}
+
+where CTR = click-through rate (like/select), ConversionRate = orders placed.
+
+\subsection{Long-Term Improvements (3-6 months)}
+
+\subsubsection{I. Neural Recommendation Model}
+
+Replace hand-crafted scoring with learned model:
+
+\begin{equation}
+\text{score}(i, u, s) = \text{MLP}\left(\left[\mathbf{v}_u; \mathbf{f}_i; \mathbf{c}_u; \mathbf{e}_i; \text{context}_s\right]\right)
+\end{equation}
+
+Architecture:
+\begin{itemize}
+    \item User encoder: $\mathbf{v}_u, \mathbf{c}_u \to \mathbf{h}_u \in \mathbb{R}^{64}$
+    \item Item encoder: $\mathbf{f}_i, \mathbf{e}_i \to \mathbf{h}_i \in \mathbb{R}^{64}$
+    \item Context encoder: meal\_intent, time, budget $\to \mathbf{h}_s \in \mathbb{R}^{32}$
+    \item Final MLP: $[\mathbf{h}_u; \mathbf{h}_i; \mathbf{h}_s] \to \text{score} \in [0,1]$
+\end{itemize}
+
+Loss function (learning-to-rank):
+\begin{equation}
+\mathcal{L} = -\sum_{(u,i^+,i^-)} \log \sigma\left(\text{score}(i^+, u, s) - \text{score}(i^-, u, s)\right)
+\end{equation}
+
+where $i^+$ is a positive item (liked/selected) and $i^-$ is negative (disliked/skipped).
+
+\subsubsection{J. Reinforcement Learning for Session Optimization}
+
+Model recommendation session as MDP:
+\begin{itemize}
+    \item \textbf{State}: $\mathcal{S}_t = (u, s, \{\text{shown items}\}, \{\text{feedback}\})$
+    \item \textbf{Action}: Select next item to show: $a_t = i$
+    \item \textbf{Reward}: 
+    \begin{equation}
+    r_t = \begin{cases}
+    +10 & \text{if user selects item (conversion)} \\
+    +2 & \text{if user likes item} \\
+    -1 & \text{if user dislikes item} \\
+    -0.1 & \text{if user skips (neutral penalty)}
+    \end{cases}
+    \end{equation}
+    \item \textbf{Policy}: $\pi(a|s)$ learned using policy gradient (REINFORCE or PPO)
+\end{itemize}
+
+Objective:
+\begin{equation}
+J(\theta) = \mathbb{E}_{\pi_\theta}\left[\sum_{t=1}^T \gamma^t r_t\right]
+\end{equation}
+
+This optimizes for long-term session success, not just immediate relevance.
+
+\subsubsection{K. FAISS-Based Two-Stage Retrieval}
+
+\textbf{Stage 1: Candidate Retrieval}
+\begin{enumerate}
+    \item Project user taste vector to embedding space:
+    \begin{equation}
+    \mathbf{q}_u = \text{Projection}(\mathbf{v}_u, \mathbf{c}_u)
+    \end{equation}
+    \item Query FAISS index: retrieve top-$k=100$ nearest neighbors by $\cos(\mathbf{q}_u, \mathbf{e}_i)$
+\end{enumerate}
+
+\textbf{Stage 2: Precise Ranking}
+\begin{enumerate}
+    \item Compute full scores for top-100 candidates only
+    \item Apply filters and contextual adjustments
+    \item Return top-10
+\end{enumerate}
+
+Reduces scoring from 200+ items to 100, ~2× speedup.
+
+\subsubsection{L. Multi-Armed Bandit for Exploration}
+
+Balance exploitation (show high-scored items) vs. exploration (try unknown items):
+
+Use Thompson Sampling or Upper Confidence Bound (UCB):
+\begin{equation}
+\text{UCB}(i) = \mu_i + c \sqrt{\frac{\ln N}{n_i}}
+\end{equation}
+
+where $\mu_i$ is average feedback for item $i$, $n_i$ is times shown, $N$ is total interactions, $c$ is exploration constant.
+
+Occasionally recommend items with high uncertainty but good potential.
+
+\section{Evaluation Metrics}
+
+To measure improvements, track:
+
+\begin{enumerate}
+    \item \textbf{Session Conversion Rate}: $\frac{\text{\# sessions with order}}{\text{total sessions}}$
+    
+    \item \textbf{Average Feedback Score per Session}:
+    \begin{equation}
+    \text{FeedbackScore} = \frac{\text{\# likes} + 2 \times \text{\# selects} - \text{\# dislikes}}{\text{\# items shown}}
+    \end{equation}
+    
+    \item \textbf{Mean Reciprocal Rank (MRR)}:
+    \begin{equation}
+    \text{MRR} = \frac{1}{|\mathcal{S}|} \sum_{s \in \mathcal{S}} \frac{1}{\text{rank of first positive item}}
+    \end{equation}
+    
+    \item \textbf{Diversity}: Average pairwise cosine distance in recommendations:
+    \begin{equation}
+    \text{Diversity} = \frac{2}{n(n-1)} \sum_{i < j} \left(1 - \cos(\mathbf{e}_i, \mathbf{e}_j)\right)
+    \end{equation}
+    
+    \item \textbf{User Retention}: Fraction of users returning for 2nd, 3rd, ... sessions
+    
+    \item \textbf{Average Session Length}: Number of items shown before conversion or abandonment
+\end{enumerate}
+
+\section{Implementation Priority}
+
+\subsection{Priority 1 (Critical - Do First)}
+\begin{enumerate}
+    \item Fix composition deduplication (Section 7.1.B)
+    \item Implement diversity enforcement with MMR (Section 7.1.A)
+    \item Batch database queries to reduce latency (Section 7.1.C)
+\end{enumerate}
+
+\subsection{Priority 2 (High Value)}
+\begin{enumerate}
+    \item Ingredient-level preference modeling (Section 7.2.E)
+    \item Temporal decay for feedback (Section 7.1.D)
+    \item Hyperparameter tuning (Section 7.2.H)
+\end{enumerate}
+
+\subsection{Priority 3 (Long-Term Investment)}
+\begin{enumerate}
+    \item Neural recommendation model (Section 7.3.I)
+    \item Collaborative filtering integration (Section 7.2.F)
+    \item FAISS two-stage retrieval (Section 7.3.K)
+\end{enumerate}
+
+\section{Conclusion}
+
+The current TasteBud recommendation system is functional but relies on heuristic scoring and manually defined feature vectors. The immediate priorities are improving diversity, fixing composition bugs, and optimizing database queries. Medium-term, moving towards ingredient-level modeling and collaborative signals will significantly enhance personalization. Long-term, a neural ranking model with reinforcement learning for session optimization represents the state-of-the-art approach.
+
+This roadmap provides a systematic path from the current content-based system to a sophisticated, data-driven recommendation engine capable of delivering highly personalized, diverse, and contextually relevant menu suggestions.
+
+\end{document}

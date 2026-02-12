@@ -14,7 +14,7 @@ class Settings:
 
     # OpenAI (bounded usage)
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -25,7 +25,7 @@ class Settings:
     ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
     # Onboarding
-    ONBOARDING_MAX_QUESTIONS: int = int(os.getenv("ONBOARDING_MAX_QUESTIONS", "5"))
+    ONBOARDING_MAX_QUESTIONS: int = int(os.getenv("ONBOARDING_MAX_QUESTIONS", "7"))
     ONBOARDING_EARLY_STOP_CONFIDENCE: float = float(os.getenv("ONBOARDING_EARLY_STOP_CONFIDENCE", "0.8"))
     ONBOARDING_K: float = float(os.getenv("ONBOARDING_K", "0.1"))
     ONBOARDING_SIGMA_STEP: float = float(os.getenv("ONBOARDING_SIGMA_STEP", "0.12"))
@@ -41,6 +41,20 @@ class Settings:
 
     # FAISS
     FAISS_INDEX_PATH: str = os.getenv("FAISS_INDEX_PATH", "data/faiss_indexes/")
+    FAISS_DIMENSION: int = int(os.getenv("FAISS_DIMENSION", "1536"))
+
+    # Frontend
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    # JWT
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+
+    # OTP
+    OTP_EXPIRE_MINUTES: int = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
+    OTP_MAX_ATTEMPTS: int = int(os.getenv("OTP_MAX_ATTEMPTS", "3"))
 
 
 settings = Settings()

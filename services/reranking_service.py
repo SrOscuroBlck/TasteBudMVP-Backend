@@ -16,12 +16,31 @@ class RecommendationContext:
         time_of_day: Optional[str] = None,
         budget: Optional[float] = None,
         mood: Optional[str] = None,
-        occasion: Optional[str] = None
+        occasion: Optional[str] = None,
+        course_preference: Optional[str] = None
     ):
-        self.time_of_day = time_of_day
+        self.time_of_day = time_of_day or self._auto_detect_time_of_day()
         self.budget = budget
         self.mood = mood
         self.occasion = occasion
+        self.course_preference = course_preference
+        self.current_hour = datetime.now().hour
+        self.day_of_week = datetime.now().weekday()
+    
+    def _auto_detect_time_of_day(self) -> str:
+        """Auto-detect time of day based on current hour."""
+        hour = datetime.now().hour
+        
+        if 6 <= hour < 11:
+            return "morning"
+        elif 11 <= hour < 15:
+            return "afternoon"
+        elif 15 <= hour < 18:
+            return "late_afternoon"
+        elif 18 <= hour < 22:
+            return "evening"
+        else:
+            return "night"
 
 
 class RankedItem:
@@ -58,14 +77,31 @@ class RerankingService:
         if not candidates:
             return []
         
+        logger.info(
+            "Starting rerank",
+            extra={"candidate_count": len(candidates), "top_n": top_n}
+        )
+        
         base_scored = self._calculate_base_scores(candidates, user)
+        logger.info(
+            "After base scoring",
+            extra={"item_count": len(base_scored)}
+        )
         
         contextual_scored = self._apply_contextual_adjustments(
             base_scored, context
         )
+        logger.info(
+            "After contextual adjustments",
+            extra={"item_count": len(contextual_scored)}
+        )
         
         diversified = self._apply_mmr_diversification(
             contextual_scored, top_n
+        )
+        logger.info(
+            "After MMR diversification",
+            extra={"item_count": len(diversified)}
         )
         
         return diversified[:top_n]
@@ -77,8 +113,24 @@ class RerankingService:
     ) -> List[RankedItem]:
         ranked_items = []
         
+        logger.info(
+            "Starting base score calculation",
+            extra={
+                "candidate_count": len(candidates),
+                "user_taste_vector": user.taste_vector
+            }
+        )
+        
         for item in candidates:
             if not item.features:
+                logger.warning(
+                    "Skipping item without features",
+                    extra={
+                        "item_id": str(item.id),
+                        "item_name": item.name,
+                        "features": item.features
+                    }
+                )
                 continue
             
             taste_sim = cosine_similarity(user.taste_vector, item.features)
@@ -121,6 +173,14 @@ class RerankingService:
                 ranking_factors=ranking_factors
             ))
         
+        logger.info(
+            "Base score calculation complete",
+            extra={
+                "ranked_item_count": len(ranked_items),
+                "top_3_scores": [round(ri.base_score, 3) for ri in sorted(ranked_items, key=lambda x: x.base_score, reverse=True)[:3]]
+            }
+        )
+        
         return ranked_items
     
     def _apply_contextual_adjustments(
@@ -131,6 +191,10 @@ class RerankingService:
         for ranked_item in items:
             item = ranked_item.item
             adjustments = 0.0
+            
+            course_adj = self._course_adjustment(item, context.course_preference)
+            adjustments += course_adj
+            ranked_item.ranking_factors["course_adjustment"] = course_adj
             
             if context.time_of_day:
                 time_adj = self._time_of_day_adjustment(item, context.time_of_day)
@@ -214,6 +278,9 @@ class RerankingService:
         if not item.cuisine:
             return 0.0
         
+        if not user.cuisine_affinity:
+            return 0.0
+        
         affinities = [
             user.cuisine_affinity.get(cuisine, 0.0)
             for cuisine in item.cuisine
@@ -288,6 +355,66 @@ class RerankingService:
                 return 0.15
             elif item.course and item.course.lower() in breakfast_courses:
                 return -0.10
+        
+        return 0.0
+    
+    def _course_adjustment(self, item: MenuItem, course_preference: Optional[str]) -> float:
+        if not item.course:
+            return 0.0
+        
+        item_course = item.course.lower()
+        
+        if course_preference:
+            preference = course_preference.lower()
+            
+            if preference in ["beverage", "drink", "drinks", "beverages"]:
+                if item_course == "beverage":
+                    return 0.4
+                else:
+                    return -0.3
+            
+            elif preference in ["main", "entree", "main course", "mains"]:
+                if item_course == "main":
+                    return 0.3
+                elif item_course in ["beverage", "condiment", "pantry"]:
+                    return -0.4
+                else:
+                    return 0.0
+            
+            elif preference in ["appetizer", "appetizers", "starter", "starters"]:
+                if item_course in ["appetizer", "starter"]:
+                    return 0.3
+                elif item_course in ["beverage", "condiment", "pantry"]:
+                    return -0.4
+                else:
+                    return -0.1
+            
+            elif preference in ["dessert", "desserts", "sweet", "sweets"]:
+                if item_course == "dessert":
+                    return 0.3
+                elif item_course in ["beverage", "condiment", "pantry"]:
+                    return -0.4
+                else:
+                    return -0.2
+            
+            elif preference in ["side", "sides"]:
+                if item_course == "side":
+                    return 0.3
+                else:
+                    return -0.2
+        
+        else:
+            if item_course == "beverage":
+                return -0.5
+            
+            elif item_course in ["condiment", "pantry"]:
+                return -0.6
+            
+            elif item_course in ["main", "appetizer", "starter"]:
+                return 0.1
+            
+            elif item_course == "dessert":
+                return 0.0
         
         return 0.0
     

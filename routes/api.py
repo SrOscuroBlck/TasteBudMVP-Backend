@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 from pydantic import BaseModel
@@ -9,7 +9,8 @@ from models import User, Restaurant, MenuItem
 from services.onboarding_service import OnboardingService
 from services.menu_service import MenuService
 from services.recommendation_service import RecommendationService
-from services.feedback_service import FeedbackService
+from services.unified_feedback_service import UnifiedFeedbackService
+from services.auth_service import auth_service, AuthenticationError
 from services.gpt_helper import explain_similarity
 from utils.logger import setup_logger
 
@@ -18,9 +19,143 @@ logger = setup_logger(__name__)
 router = APIRouter()
 
 
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    session: Session = Depends(get_session)
+) -> User:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header format")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    try:
+        user = auth_service.verify_token(token, session)
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error("Error verifying token", extra={"error": str(e)}, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/health")
 def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+class RequestOTPBody(BaseModel):
+    email: str
+
+
+class VerifyOTPBody(BaseModel):
+    email: str
+    code: str
+    device_info: Optional[str] = None
+
+
+class RefreshTokenBody(BaseModel):
+    refresh_token: str
+
+
+@router.post("/auth/request-otp")
+def request_otp(body: RequestOTPBody, session: Session = Depends(get_session)):
+    try:
+        otp = auth_service.request_otp(body.email, session)
+        return {
+            "success": True,
+            "message": "OTP sent to email",
+            "expires_at": otp.expires_at.isoformat()
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except AuthenticationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error("Error requesting OTP", extra={"error": str(e)}, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/auth/verify-otp")
+def verify_otp(body: VerifyOTPBody, session: Session = Depends(get_session)):
+    try:
+        user_session = auth_service.verify_otp(body.email, body.code, body.device_info, session)
+        user = session.get(User, user_session.user_id)
+        
+        return {
+            "success": True,
+            "access_token": user_session.token,
+            "refresh_token": user_session.refresh_token,
+            "token_type": "bearer",
+            "expires_at": user_session.expires_at.isoformat(),
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "email_verified": user.email_verified,
+                "onboarding_completed": user.onboarding_completed
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error("Error verifying OTP", extra={"error": str(e)}, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/auth/refresh-token")
+def refresh_token(body: RefreshTokenBody, session: Session = Depends(get_session)):
+    try:
+        user_session = auth_service.refresh_session(body.refresh_token, session)
+        
+        return {
+            "success": True,
+            "access_token": user_session.token,
+            "refresh_token": user_session.refresh_token,
+            "token_type": "bearer",
+            "expires_at": user_session.expires_at.isoformat()
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error("Error refreshing token", extra={"error": str(e)}, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/auth/session")
+def get_session_info(current_user: User = Depends(get_current_user)):
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "email_verified": current_user.email_verified,
+        "onboarding_completed": current_user.onboarding_completed,
+        "last_login": current_user.last_login.isoformat() if current_user.last_login else None
+    }
+
+
+@router.post("/auth/logout")
+def logout(
+    authorization: Optional[str] = Header(None),
+    session: Session = Depends(get_session)
+):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=400, detail="Invalid authorization header")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    try:
+        auth_service.logout(token, session)
+        return {"success": True, "message": "Logged out successfully"}
+    except Exception as e:
+        logger.error("Error logging out", extra={"error": str(e)}, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class OnboardingStartBody(BaseModel):
@@ -28,32 +163,36 @@ class OnboardingStartBody(BaseModel):
 
 
 @router.post("/onboarding/start")
-def onboarding_start(body: OnboardingStartBody, session: Session = Depends(get_session)):
-    user = session.get(User, body.user_id)
-    if not user:
-        user = User(id=body.user_id)
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-        logger.info("Created new user", extra={"user_id": str(body.user_id)})
-    
-    logger.info("Starting onboarding", extra={"user_id": str(body.user_id)})
+def onboarding_start(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    logger.info("Starting onboarding", extra={"user_id": str(current_user.id)})
     svc = OnboardingService()
-    return svc.start(user, session)
+    return svc.start(current_user, session)
 
 
 @router.post("/onboarding/answer")
-def onboarding_answer(payload: Dict[str, Any], session: Session = Depends(get_session)):
+def onboarding_answer(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
     try:
-        user_id = UUID(payload["user_id"])  # type: ignore[arg-type]
-        user = session.get(User, user_id)
-        if not user:
-            logger.warning("User not found for onboarding answer", extra={"user_id": str(user_id)})
-            raise HTTPException(404, "user not found")
-        
-        logger.info("Processing onboarding answer", extra={"user_id": str(user_id), "question_id": payload.get("question_id")})
+        logger.info(
+            "Processing onboarding answer",
+            extra={"user_id": str(current_user.id), "question_id": payload.get("question_id")}
+        )
         svc = OnboardingService()
-        return svc.answer(user, payload["question_id"], payload["chosen_option_id"], session)
+        result = svc.answer(current_user, payload["question_id"], payload["chosen_option_id"], session)
+        
+        if result.get("complete"):
+            current_user.onboarding_completed = True
+            session.add(current_user)
+            session.commit()
+            logger.info("Onboarding completed", extra={"user_id": str(current_user.id)})
+        
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -62,42 +201,57 @@ def onboarding_answer(payload: Dict[str, Any], session: Session = Depends(get_se
 
 
 @router.get("/onboarding/state")
-def onboarding_state(user_id: UUID, session: Session = Depends(get_session)):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(404, "user not found")
-    return user.onboarding_state or {}
+def onboarding_state(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    return current_user.onboarding_state or {}
 
 
  
 
 
 @router.get("/users/{user_id}/profile")
-def get_profile(user_id: UUID, session: Session = Depends(get_session)):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(404, "user not found")
+def get_profile(
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if str(current_user.id) != str(user_id):
+        raise HTTPException(403, "Cannot access other user's profile")
+    
     return {
-        "id": str(user.id),
-        "allergies": user.allergies,
-        "dietary_rules": user.dietary_rules,
-        "liked_ingredients": user.liked_ingredients,
-        "disliked_ingredients": user.disliked_ingredients,
-        "taste_vector": user.taste_vector,
-        "taste_uncertainty": user.taste_uncertainty,
-        "cuisine_affinity": user.cuisine_affinity,
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "allergies": current_user.allergies,
+        "dietary_rules": current_user.dietary_rules,
+        "liked_ingredients": current_user.liked_ingredients,
+        "disliked_ingredients": current_user.disliked_ingredients,
+        "taste_vector": current_user.taste_vector,
+        "taste_uncertainty": current_user.taste_uncertainty,
+        "cuisine_affinity": current_user.cuisine_affinity,
+        "onboarding_completed": current_user.onboarding_completed,
     }
 
 
 @router.patch("/users/{user_id}/preferences")
-def update_prefs(user_id: UUID, payload: Dict[str, Any], session: Session = Depends(get_session)):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(404, "user not found")
+def update_prefs(
+    user_id: UUID,
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if str(current_user.id) != str(user_id):
+        raise HTTPException(403, "Cannot update other user's preferences")
+    
     for k in ["allergies", "dietary_rules", "liked_ingredients", "disliked_ingredients"]:
         if k in payload:
-            setattr(user, k, payload[k])
-    session.add(user)
+            setattr(current_user, k, payload[k])
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    logger.info("Updated user preferences", extra={"user_id": str(user_id)})
+    return {"success": True}
     session.commit()
     return {"status": "ok"}
 
@@ -141,45 +295,43 @@ def list_restaurants(session: Session = Depends(get_session)):
 
 @router.get("/recommendations")
 def recommendations(
-    user_id: UUID,
     restaurant_id: Optional[UUID] = None,
     top_n: int = 10,
     budget: Optional[float] = None,
     time_of_day: Optional[str] = None,
     mood: Optional[str] = None,
     occasion: Optional[str] = None,
+    course_preference: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    user = session.get(User, user_id)
-    if not user:
-        logger.warning("User not found for recommendations", extra={"user_id": str(user_id)})
-        raise HTTPException(404, "user not found")
-    
     logger.info(
         "Generating recommendations",
         extra={
-            "user_id": str(user_id),
+            "user_id": str(current_user.id),
             "restaurant_id": str(restaurant_id) if restaurant_id else None,
             "top_n": top_n,
             "mood": mood,
-            "occasion": occasion
+            "occasion": occasion,
+            "course_preference": course_preference
         }
     )
     svc = RecommendationService()
     result = svc.recommend(
         session,
-        user,
+        current_user,
         str(restaurant_id) if restaurant_id else None,
         top_n,
         budget,
         time_of_day,
         mood,
-        occasion
+        occasion,
+        course_preference
     )
     logger.info(
         "Recommendations generated",
         extra={
-            "user_id": str(user_id),
+            "user_id": str(current_user.id),
             "result_count": len(result.get("items", [])) if isinstance(result, dict) else 0
         }
     )
@@ -187,43 +339,61 @@ def recommendations(
 
 
 @router.post("/discovery/quick-like")
-def quick_like(payload: Dict[str, Any], session: Session = Depends(get_session)):
-    from uuid import UUID as _UUID
-    user = session.get(User, _UUID(payload["user_id"]))
-    if not user:
-        raise HTTPException(404, "user not found")
-    # Use feedback learning without storing a rating; treat as low-weight like/dislike
-    svc = FeedbackService()
-    # Reuse rating with minimal side effects
+def quick_like(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    svc = UnifiedFeedbackService()
     liked = bool(payload.get("liked", True))
     item_id = payload["item_id"]
-    svc.add_rating(session, user, item_id, 5 if liked else 1, liked, reasons=["quick_like"])  # learning effect
+    svc.add_rating(
+        session,
+        current_user,
+        item_id,
+        5 if liked else 1,
+        liked,
+        reasons=["quick_like"]
+    )
     return {"status": "ok"}
 
+
 @router.post("/feedback/rating")
-def post_rating(payload: Dict[str, Any], session: Session = Depends(get_session)):
-    from uuid import UUID as _UUID
-    user_id = _UUID(payload["user_id"])
-    user = session.get(User, user_id)
-    if not user:
-        logger.warning("User not found for feedback rating", extra={"user_id": str(user_id)})
-        raise HTTPException(404, "user not found")
-    
-    logger.info("Recording feedback rating", extra={"user_id": str(user_id), "item_id": payload.get("item_id"), "rating": payload.get("rating")})
-    svc = FeedbackService()
-    r = svc.add_rating(session, user, payload["item_id"], int(payload["rating"]), bool(payload["liked"]), payload.get("reasons", []), payload.get("comment", ""))
-    logger.info("Feedback rating recorded", extra={"user_id": str(user_id), "rating_id": str(r.id)})
+def post_rating(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    logger.info(
+        "Recording feedback rating",
+        extra={
+            "user_id": str(current_user.id),
+            "item_id": payload.get("item_id"),
+            "rating": payload.get("rating")
+        }
+    )
+    svc = UnifiedFeedbackService()
+    r = svc.add_rating(
+        session,
+        current_user,
+        payload["item_id"],
+        int(payload["rating"]),
+        bool(payload["liked"]),
+        payload.get("reasons", []),
+        payload.get("comment", "")
+    )
+    logger.info("Feedback rating recorded", extra={"user_id": str(current_user.id), "rating_id": str(r.id)})
     return {"id": str(r.id)}
 
 
 @router.post("/feedback/interaction")
-def post_interaction(payload: Dict[str, Any], session: Session = Depends(get_session)):
-    from uuid import UUID as _UUID
-    user = session.get(User, _UUID(payload["user_id"]))
-    if not user:
-        raise HTTPException(404, "user not found")
-    svc = FeedbackService()
-    inter = svc.add_interaction(session, user, payload["item_id"], payload["type"])
+def post_interaction(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    svc = UnifiedFeedbackService()
+    inter = svc.add_interaction(session, current_user, payload["item_id"], payload["type"])
     return {"id": str(inter.id)}
 
 

@@ -1,8 +1,9 @@
-from typing import List, Optional
+from typing import List, Optional, Set
 from uuid import UUID
 from sqlmodel import Session, select
+from datetime import datetime, timedelta
 
-from models import MenuItem, User
+from models import MenuItem, User, Rating
 from services.faiss_service import FAISSService
 from services.features import has_allergen, violates_diet, cosine_similarity
 from config.settings import settings
@@ -41,18 +42,22 @@ class RetrievalService:
         k: int = 50,
         restaurant_id: Optional[str] = None,
         budget: Optional[float] = None,
-        use_faiss: bool = True
+        use_faiss: bool = True,
+        exclude_recent_days: int = 2
     ) -> List[MenuItem]:
         if not user.taste_vector:
             raise ValueError("user taste_vector is required for retrieval")
         
+        # Get recently interacted items to exclude
+        recent_item_ids = self._get_recent_item_ids(session, user, days=exclude_recent_days)
+        
         if use_faiss and self._ensure_faiss_loaded():
             return self._retrieve_with_faiss(
-                session, user, k, restaurant_id, budget
+                session, user, k, restaurant_id, budget, recent_item_ids
             )
         else:
             return self._retrieve_with_sql(
-                session, user, k, restaurant_id, budget
+                session, user, k, restaurant_id, budget, recent_item_ids
             )
     
     def _retrieve_with_faiss(
@@ -61,7 +66,8 @@ class RetrievalService:
         user: User,
         k: int,
         restaurant_id: Optional[str],
-        budget: Optional[float]
+        budget: Optional[float],
+        recent_item_ids: Set[UUID]
     ) -> List[MenuItem]:
         embedding_field = "reduced_embedding" if settings.FAISS_DIMENSION == 64 else "embedding"
         
@@ -71,9 +77,10 @@ class RetrievalService:
                 "User has no embedding, falling back to SQL",
                 extra={"user_id": str(user.id)}
             )
-            return self._retrieve_with_sql(session, user, k, restaurant_id, budget)
+            return self._retrieve_with_sql(session, user, k, restaurant_id, budget, recent_item_ids)
         
-        k_inflated = k * 3
+        # Inflate k to account for filtering
+        k_inflated = k * 4  # Increased from 3 to account for recency filtering
         
         try:
             search_results = self.faiss_service.search(
@@ -86,7 +93,7 @@ class RetrievalService:
                 extra={"error": str(e)},
                 exc_info=True
             )
-            return self._retrieve_with_sql(session, user, k, restaurant_id, budget)
+            return self._retrieve_with_sql(session, user, k, restaurant_id, budget, recent_item_ids)
         
         item_ids = [item_id for item_id, _ in search_results]
         
@@ -102,8 +109,23 @@ class RetrievalService:
             if item_id in items_dict:
                 ordered_items.append(items_dict[item_id])
         
+        # Apply recency filter
+        filtered_by_recency = [
+            item for item in ordered_items 
+            if item.id not in recent_item_ids
+        ]
+        
+        logger.info(
+            "Applied recency filter",
+            extra={
+                "before_count": len(ordered_items),
+                "after_count": len(filtered_by_recency),
+                "filtered_count": len(ordered_items) - len(filtered_by_recency)
+            }
+        )
+        
         filtered_items = self._apply_safety_filters(
-            ordered_items, user, budget
+            filtered_by_recency, user, budget
         )
         
         return filtered_items[:k]
@@ -114,7 +136,8 @@ class RetrievalService:
         user: User,
         k: int,
         restaurant_id: Optional[str],
-        budget: Optional[float]
+        budget: Optional[float],
+        recent_item_ids: Set[UUID]
     ) -> List[MenuItem]:
         query = select(MenuItem)
         if restaurant_id:
@@ -122,8 +145,14 @@ class RetrievalService:
         
         all_items = list(session.exec(query).all())
         
+        # Apply recency filter
+        non_recent_items = [
+            item for item in all_items
+            if item.id not in recent_item_ids
+        ]
+        
         filtered_items = self._apply_safety_filters(
-            all_items, user, budget
+            non_recent_items, user, budget
         )
         
         scored_items = []
@@ -181,3 +210,52 @@ class RetrievalService:
             embedding = embedding + [0.0] * (1536 - len(embedding))
         
         return embedding
+    
+    def _get_recent_item_ids(
+        self,
+        session: Session,
+        user: User,
+        days: int = 2
+    ) -> Set[UUID]:
+        """Get item IDs that user interacted with in the last N days or permanently excluded."""
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        
+        recent_ratings = session.exec(
+            select(Rating.item_id)
+            .where(Rating.user_id == user.id)
+            .where(Rating.timestamp >= cutoff_date)
+        ).all()
+        
+        from models.session import RecommendationFeedback, RecommendationSession
+        
+        disliked_feedback = session.exec(
+            select(RecommendationFeedback.item_id)
+            .where(RecommendationFeedback.session_id.in_(
+                select(RecommendationSession.id)
+                .where(RecommendationSession.user_id == user.id)
+            ))
+            .where(RecommendationFeedback.feedback_type == "dislike")
+            .where(RecommendationFeedback.timestamp >= cutoff_date - timedelta(days=28))
+        ).all()
+        
+        excluded = set(recent_ratings)
+        excluded.update(disliked_feedback)
+        
+        for item_id_str in user.permanently_excluded_items:
+            try:
+                excluded.add(UUID(item_id_str))
+            except (ValueError, AttributeError):
+                continue
+        
+        logger.info(
+            "Excluded items calculated",
+            extra={
+                "user_id": str(user.id),
+                "from_ratings": len(recent_ratings),
+                "from_feedback": len(disliked_feedback),
+                "from_permanent": len(user.permanently_excluded_items),
+                "total_excluded": len(excluded)
+            }
+        )
+        
+        return excluded
