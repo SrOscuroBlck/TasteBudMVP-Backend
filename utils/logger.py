@@ -21,7 +21,14 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
         }
         
-        # Add all extra fields from the record
+        try:
+            from utils.correlation_id import get_correlation_id
+            correlation_id = get_correlation_id()
+            if correlation_id:
+                log_data["correlation_id"] = correlation_id
+        except ImportError:
+            pass
+        
         for key, value in record.__dict__.items():
             if key not in self.RESERVED_ATTRS and not key.startswith('_'):
                 log_data[key] = value

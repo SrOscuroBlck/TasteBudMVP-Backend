@@ -1,8 +1,17 @@
 from __future__ import annotations
-from typing import Dict
+from typing import Dict,List
 from uuid import uuid4, UUID
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, JSON
+
+
+class TasteArchetype(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str = Field(index=True)
+    description: str
+    taste_vector: Dict[str, float] = Field(sa_column=Column(JSON))
+    typical_cuisines: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    example_items: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 
 
 class PopulationStats(SQLModel, table=True):

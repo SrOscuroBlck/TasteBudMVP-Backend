@@ -42,13 +42,8 @@ def seed():
         )
         s.add(pop)
 
-        u1 = User()
-        u2 = User()
-        u2.allergies = ["gluten"]
-        s.add(u1); s.add(u2)
-
         s.commit()
-        logger.info("Database seeded successfully", extra={"restaurants": 2, "menu_items": 4, "users": 2})
+        logger.info("Database seeded successfully", extra={"restaurants": 2, "menu_items": 4})
 
 
 if __name__ == "__main__":

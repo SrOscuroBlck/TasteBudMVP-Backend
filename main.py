@@ -6,6 +6,17 @@ from pathlib import Path
 from sqlalchemy import text
 from config import settings, create_db_and_tables, engine
 from routes.api import router as api_router
+from routes.ingestion import router as ingestion_router
+from routes.sessions import router as sessions_router
+from routes.feedback import router as feedback_router
+from routes.admin_rebuild import router as admin_rebuild_router
+# from routes.recommendation_session import router as recommendation_session_router
+from services.faiss_service import FAISSService
+from scripts.migrate_add_permanently_excluded_items import add_permanently_excluded_items_column
+from scripts.migrate_fix_permanently_excluded_items_type import fix_permanently_excluded_items_type
+from scripts.migrate_add_feedback_indexes import add_feedback_performance_indexes
+from scripts.migrate_add_course_cuisine import add_course_and_cuisine_columns
+from scripts.migrate_add_ingredient_penalties import add_ingredient_penalties_column
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -21,9 +32,39 @@ async def lifespan(app: FastAPI):
         conn.commit()
     logger.info("Enabled pgvector extension")
     
-    # Create all tables (auto-sync models)
+    # Create all tables first (handles fresh databases)
     create_db_and_tables()
     logger.info("Database tables synchronized")
+    
+    # Run migrations for existing tables (handles schema updates)
+    add_permanently_excluded_items_column()
+    fix_permanently_excluded_items_type()  # Fix TEXT -> JSONB conversion
+    add_feedback_performance_indexes()
+    add_course_and_cuisine_columns()  # Add meal type filtering columns
+    add_ingredient_penalties_column()  # Add ingredient-level learning for cross-restaurant feedback
+    
+    # Load FAISS index for similarity search
+    faiss_service = FAISSService()
+    index_loaded = False
+    
+    try:
+        faiss_service.load(index_name="current", dimension=64)
+        logger.info("FAISS index loaded successfully", extra={"dimension": 64, "count": faiss_service.index_size})
+        index_loaded = True
+    except FileNotFoundError:
+        logger.info("64D FAISS index not found, trying 1536D fallback")
+        try:
+            faiss_service.load(index_name="current", dimension=1536)
+            logger.info("FAISS index loaded successfully", extra={"dimension": 1536, "count": faiss_service.index_size})
+            index_loaded = True
+        except FileNotFoundError:
+            logger.warning("FAISS index not found, similarity search will be unavailable")
+        except Exception as e:
+            logger.error("Failed to load 1536D FAISS index", extra={"error": str(e)}, exc_info=True)
+    except Exception as e:
+        logger.error("Failed to load 64D FAISS index", extra={"error": str(e)}, exc_info=True)
+    
+    app.state.faiss_service = faiss_service if index_loaded else None
     
     yield
     
@@ -41,6 +82,11 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(ingestion_router, prefix="/api/v1")
+app.include_router(sessions_router, prefix="/api/v1")
+app.include_router(feedback_router, prefix="/api/v1")
+app.include_router(admin_rebuild_router, prefix="/api/v1")
+# app.include_router(recommendation_session_router, prefix="/api/v1")
 
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)

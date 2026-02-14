@@ -28,6 +28,8 @@ class MenuItem(SQLModel, table=True):
     cooking_method: Optional[str] = None
     course: Optional[str] = None
     features: Dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON))
+    texture: Dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON))
+    richness: Optional[float] = None
     provenance: Dict = Field(default_factory=dict, sa_column=Column(JSON))
     inference_confidence: float = 1.0
     
