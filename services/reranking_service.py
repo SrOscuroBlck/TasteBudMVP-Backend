@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import math
 
-from models import MenuItem, User, PopulationStats
+from models import MenuItem, User, PopulationStats, BayesianTasteProfile
 from services.features import cosine_similarity
 from config.settings import settings
 from utils.logger import setup_logger
@@ -66,23 +66,29 @@ class RankedItem:
 class RerankingService:
     def __init__(self, population_stats: Optional[PopulationStats] = None):
         self.population_stats = population_stats
+        self.use_bayesian_profiles = True
         
     def rerank(
         self,
         candidates: List[MenuItem],
         user: User,
         context: RecommendationContext,
-        top_n: int = 10
+        top_n: int = 10,
+        bayesian_profile: Optional[BayesianTasteProfile] = None
     ) -> List[RankedItem]:
         if not candidates:
             return []
         
         logger.info(
-            "Starting rerank",
-            extra={"candidate_count": len(candidates), "top_n": top_n}
+            "Starting reranking",
+            extra={
+                "candidate_count": len(candidates),
+                "top_n": top_n,
+                "use_bayesian": self.use_bayesian_profiles and bayesian_profile is not None
+            }
         )
         
-        base_scored = self._calculate_base_scores(candidates, user)
+        base_scored = self._calculate_base_scores(candidates, user, bayesian_profile)
         logger.info(
             "After base scoring",
             extra={"item_count": len(base_scored)}
@@ -109,15 +115,23 @@ class RerankingService:
     def _calculate_base_scores(
         self,
         candidates: List[MenuItem],
-        user: User
+        user: User,
+        bayesian_profile: Optional[BayesianTasteProfile] = None
     ) -> List[RankedItem]:
         ranked_items = []
+        
+        use_bayesian = self.use_bayesian_profiles and bayesian_profile is not None
+        
+        sampled_tastes = None
+        if use_bayesian:
+            sampled_tastes = bayesian_profile.sample_taste_preferences()
         
         logger.info(
             "Starting base score calculation",
             extra={
                 "candidate_count": len(candidates),
-                "user_taste_vector": user.taste_vector
+                "user_taste_vector": user.taste_vector if not use_bayesian else sampled_tastes,
+                "using_bayesian": use_bayesian
             }
         )
         
@@ -133,13 +147,18 @@ class RerankingService:
                 )
                 continue
             
-            taste_sim = cosine_similarity(user.taste_vector, item.features)
-            
-            cuisine_bonus = self._calculate_cuisine_affinity(item, user)
+            if use_bayesian and sampled_tastes:
+                taste_sim = cosine_similarity(sampled_tastes, item.features)
+                cuisine_bonus = self._calculate_cuisine_affinity_bayesian(item, bayesian_profile)
+            else:
+                taste_sim = cosine_similarity(user.taste_vector, item.features)
+                cuisine_bonus = self._calculate_cuisine_affinity(item, user)
             
             popularity_bonus = self._calculate_popularity(item)
             
             ingredient_bonus = self._calculate_ingredient_preferences(item, user)
+            
+            exploration_bonus = self._calculate_exploration_bonus(item, user)
             
             confidence = self._calculate_confidence(item)
             
@@ -152,7 +171,8 @@ class RerankingService:
                 taste_sim +
                 settings.LAMBDA_CUISINE * cuisine_bonus +
                 settings.LAMBDA_POP * popularity_bonus +
-                ingredient_bonus -
+                ingredient_bonus +
+                exploration_bonus -
                 provenance_penalty
             )
             base_score = max(0.0, min(1.0, base_score))
@@ -162,6 +182,7 @@ class RerankingService:
                 "cuisine_affinity": cuisine_bonus,
                 "popularity": popularity_bonus,
                 "ingredient_preferences": ingredient_bonus,
+                "exploration_bonus": exploration_bonus,
                 "provenance_penalty": provenance_penalty
             }
             
@@ -287,6 +308,23 @@ class RerankingService:
         ]
         return max(affinities) if affinities else 0.0
     
+    def _calculate_cuisine_affinity_bayesian(
+        self,
+        item: MenuItem,
+        profile: BayesianTasteProfile
+    ) -> float:
+        if not item.cuisine:
+            return 0.0
+        
+        if not profile.cuisine_means:
+            return 0.0
+        
+        affinities = [
+            profile.cuisine_means.get(cuisine, 0.5)
+            for cuisine in item.cuisine
+        ]
+        return max(affinities) if affinities else 0.5
+    
     def _calculate_popularity(self, item: MenuItem) -> float:
         if not self.population_stats:
             return 0.0
@@ -317,6 +355,21 @@ class RerankingService:
             bonus += 0.05
         
         return bonus
+    
+    def _calculate_exploration_bonus(self, item: MenuItem, user: User) -> float:
+        if not user.taste_uncertainty or not item.features:
+            return 0.0
+        
+        exploration_score = 0.0
+        
+        for axis, feature_value in item.features.items():
+            uncertainty = user.taste_uncertainty.get(axis, 0.5)
+            
+            exploration_score += uncertainty * abs(feature_value)
+        
+        normalized_score = exploration_score / max(1.0, len(item.features))
+        
+        return settings.EXPLORATION_COEFFICIENT * normalized_score
     
     def _calculate_confidence(self, item: MenuItem) -> float:
         confidence = 0.5

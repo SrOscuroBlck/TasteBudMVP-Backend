@@ -8,12 +8,12 @@ from sqlalchemy import Column, JSON
 
 
 class MealIntent(str, Enum):
-    APPETIZER = "appetizer"
-    MAIN_COURSE = "main_course"
-    DESSERT = "dessert"
     FULL_MEAL = "full_meal"
-    SNACK = "snack"
-    BEVERAGE = "beverage"
+    MAIN_ONLY = "main_only"
+    APPETIZER_ONLY = "appetizer_only"
+    DESSERT_ONLY = "dessert_only"
+    BEVERAGE_ONLY = "beverage_only"
+    LIGHT_SNACK = "light_snack"
 
 
 class FeedbackType(str, Enum):
@@ -21,6 +21,9 @@ class FeedbackType(str, Enum):
     DISLIKE = "dislike"
     SAVE_FOR_LATER = "save_for_later"
     SELECTED = "selected"
+    ACCEPTED = "accepted"  # User approves item for their order (no strong preference signal)
+    SKIP = "skip"  # User wants to see different option
+    MORE = "more"  # User neutral, wants more options
 
 
 class RecommendationSession(SQLModel, table=True):
@@ -43,12 +46,16 @@ class RecommendationSession(SQLModel, table=True):
     
     started_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
-    selected_items: List[UUID] = Field(default_factory=list, sa_column=Column(JSON))
+    selected_items: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     status: str = "active"
     
     items_shown: List[str] = Field(default_factory=list, sa_column=Column(JSON))
-    excluded_items: List[UUID] = Field(default_factory=list, sa_column=Column(JSON))
+    excluded_items: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     iteration_count: int = 0
+    
+    # Composition tracking for full_meal intent
+    active_composition_id: Optional[str] = None
+    composition_validation_state: Dict = Field(default_factory=dict, sa_column=Column(JSON))  # Temp cache: {course: {item_id, status}}
     
     user_experience_level: str = "learning"
     context_snapshot: Dict = Field(default_factory=dict, sa_column=Column(JSON))

@@ -5,7 +5,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from config.database import get_session
-from models.restaurant import Restaurant
+from models.restaurant import Restaurant, MenuItem
 from models.ingestion import MenuUpload, IngestionStatus, IngestionSource
 from services.ingestion import IngestionOrchestrator
 from utils.file_handler import save_uploaded_file, FileUploadError
@@ -80,10 +80,48 @@ def list_restaurants(session: Session = Depends(get_session)) -> List[Restaurant
     ]
 
 
+@router.delete("/restaurants/{restaurant_id}/menu")
+def delete_restaurant_menu(
+    restaurant_id: str,
+    session: Session = Depends(get_session)
+) -> Dict[str, Any]:
+    """Delete all menu items for a specific restaurant."""
+    if not restaurant_id:
+        raise HTTPException(status_code=400, detail="restaurant_id is required")
+    
+    try:
+        restaurant_uuid = UUID(restaurant_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid restaurant_id format")
+    
+    restaurant = session.get(Restaurant, restaurant_uuid)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail=f"Restaurant {restaurant_id} not found")
+    
+    # Delete all menu items for this restaurant
+    statement = select(MenuItem).where(MenuItem.restaurant_id == restaurant_uuid)
+    menu_items = session.exec(statement).all()
+    
+    deleted_count = len(menu_items)
+    
+    for item in menu_items:
+        session.delete(item)
+    
+    session.commit()
+    
+    return {
+        "restaurant_id": restaurant_id,
+        "restaurant_name": restaurant.name,
+        "deleted_items": deleted_count,
+        "message": f"Successfully deleted {deleted_count} menu items"
+    }
+
+
 @router.post("/upload/pdf", response_model=UploadResponse)
 async def upload_pdf_menu(
     restaurant_id: str = Form(...),
     file: UploadFile = File(...),
+    currency: str | None = Form(None),
     session: Session = Depends(get_session)
 ) -> UploadResponse:
     if not restaurant_id:
@@ -123,7 +161,8 @@ async def upload_pdf_menu(
             session=session,
             restaurant_id=restaurant_uuid,
             file_path=file_path,
-            original_filename=file.filename
+            original_filename=file.filename,
+            currency=currency
         )
         
         notes = ""

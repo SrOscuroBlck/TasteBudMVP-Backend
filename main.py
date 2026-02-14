@@ -9,10 +9,14 @@ from routes.api import router as api_router
 from routes.ingestion import router as ingestion_router
 from routes.sessions import router as sessions_router
 from routes.feedback import router as feedback_router
+from routes.admin_rebuild import router as admin_rebuild_router
+# from routes.recommendation_session import router as recommendation_session_router
 from services.faiss_service import FAISSService
 from scripts.migrate_add_permanently_excluded_items import add_permanently_excluded_items_column
 from scripts.migrate_fix_permanently_excluded_items_type import fix_permanently_excluded_items_type
 from scripts.migrate_add_feedback_indexes import add_feedback_performance_indexes
+from scripts.migrate_add_course_cuisine import add_course_and_cuisine_columns
+from scripts.migrate_add_ingredient_penalties import add_ingredient_penalties_column
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -36,6 +40,8 @@ async def lifespan(app: FastAPI):
     add_permanently_excluded_items_column()
     fix_permanently_excluded_items_type()  # Fix TEXT -> JSONB conversion
     add_feedback_performance_indexes()
+    add_course_and_cuisine_columns()  # Add meal type filtering columns
+    add_ingredient_penalties_column()  # Add ingredient-level learning for cross-restaurant feedback
     
     # Load FAISS index for similarity search
     faiss_service = FAISSService()
@@ -79,6 +85,8 @@ app.include_router(api_router, prefix="/api/v1")
 app.include_router(ingestion_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(feedback_router, prefix="/api/v1")
+app.include_router(admin_rebuild_router, prefix="/api/v1")
+# app.include_router(recommendation_session_router, prefix="/api/v1")
 
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)

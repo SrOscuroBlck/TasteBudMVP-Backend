@@ -26,6 +26,14 @@ class StartSessionRequest(BaseModel):
     time_constraint_minutes: Optional[int] = None
 
 
+class PreviousOrderSummary(BaseModel):
+    item_id: str
+    name: str
+    times_ordered: int
+    last_ordered: Optional[datetime]
+    rating: Optional[int]
+
+
 class VisitContext(BaseModel):
     is_repeat_visit: bool
     previous_visit_count: int
@@ -49,16 +57,26 @@ class RecommendationFeedbackRequest(BaseModel):
     comment: Optional[str] = None
 
 
+class CompositionFeedbackRequest(BaseModel):
+    """Feedback for individual items within a full meal composition"""
+    composition_id: str
+    
+    # Individual course feedback - each required
+    appetizer_feedback: FeedbackType  # accepted, skip, like, save_for_later, more
+    appetizer_comment: Optional[str] = None
+    
+    main_feedback: FeedbackType
+    main_comment: Optional[str] = None
+    
+    dessert_feedback: FeedbackType
+    dessert_comment: Optional[str] = None
+    
+    # Action to take: "order_all" (all accepted), "regenerate_all\" (none accepted), "regenerate_partial" (some accepted)
+    composition_action: str
+
+
 class CompleteSessionRequest(BaseModel):
     selected_item_ids: List[UUID]
-
-
-class PreviousOrderSummary(BaseModel):
-    item_id: str
-    name: str
-    times_ordered: int
-    last_ordered: Optional[datetime]
-    rating: Optional[int]
 
 
 class SessionSummary(BaseModel):
@@ -203,6 +221,8 @@ def get_next_recommendations(
             top_n=request.count
         )
         
+        db.commit()  # Commit composition state updates
+        
         logger.info(
             "Next recommendations generated",
             extra={
@@ -264,7 +284,7 @@ def add_feedback(
         comment=request.comment
     )
     
-    if request.feedback_type == FeedbackType.DISLIKE:
+    if request.feedback_type in [FeedbackType.DISLIKE, FeedbackType.SKIP]:
         session_service.add_excluded_item(db, session_id, request.item_id)
     
     logger.info(
@@ -278,6 +298,139 @@ def add_feedback(
     )
     
     return {"success": True, "message": "Feedback recorded and profile updated"}
+
+
+@router.post("/{session_id}/composition/feedback")
+def add_composition_feedback(
+    session_id: UUID,
+    request: CompositionFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    """
+    Handle granular feedback on a full meal composition.
+    Allows user to accept/reject individual courses and trigger partial regeneration.
+    """
+    if not request.composition_id:
+        raise HTTPException(status_code=400, detail="composition_id is required")
+    
+    if request.composition_action not in ["order_all", "regenerate_all", "regenerate_partial"]:
+        raise HTTPException(status_code=400, detail="Invalid composition_action")
+    
+    session_service = RecommendationSessionService()
+    rec_session = session_service.get_session(db, session_id)
+    
+    if not rec_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if rec_session.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot access other user's session")
+    
+    if rec_session.status != "active":
+        raise HTTPException(status_code=400, detail="Session is not active")
+    
+    if rec_session.meal_intent != "full_meal":
+        raise HTTPException(status_code=400, detail="Composition feedback only available for full_meal intent")
+    
+    # Get the composition from session context to extract item IDs  
+    if not rec_session.active_composition_id or rec_session.active_composition_id != request.composition_id:
+        raise HTTPException(status_code=400, detail="Composition not found or no longer active")
+    
+    validation_state = rec_session.composition_validation_state.get(request.composition_id, {})
+    if not validation_state:
+        raise HTTPException(status_code=400, detail="Composition validation state not found")
+    
+    # Extract item IDs from validation state  
+    appetizer_id = UUID(validation_state.get("appetizer", {}).get("item_id"))
+    main_id = UUID(validation_state.get("main", {}).get("item_id"))
+    dessert_id = UUID(validation_state.get("dessert", {}).get("item_id"))
+    
+    # Record feedback for each item using existing feedback service
+    from models import MenuItem
+    unified_feedback_service = UnifiedFeedbackService()
+    
+    for course, item_id, feedback_type, comment in [
+        ("appetizer", appetizer_id, request.appetizer_feedback, request.appetizer_comment),
+        ("main", main_id, request.main_feedback, request.main_comment),
+        ("dessert", dessert_id, request.dessert_feedback, request.dessert_comment)
+    ]:
+        item = db.get(MenuItem, item_id)
+        if not item:
+            logger.warning(f"Item {item_id} not found for feedback")
+            continue
+        
+        # Record in RecommendationFeedback table
+        unified_feedback_service.record_session_feedback(
+            db_session=db,
+            user=current_user,
+            item=item,
+            feedback_type=feedback_type,
+            session_id=session_id,
+            comment=comment
+        )
+        
+        # Update validation state cache
+        validation_state[course] = {
+            "item_id": str(item_id),
+            "status": feedback_type.value
+        }
+        
+        # Add to excluded if rejected
+        if feedback_type in [FeedbackType.DISLIKE, FeedbackType.SKIP, FeedbackType.MORE]:
+            session_service.add_excluded_item(db, session_id, item_id)
+    
+    # Update session validation state
+    session_service.update_composition_validation_state(
+        db_session=db,
+        session_id=session_id,
+        composition_id=request.composition_id,
+        validation_state=validation_state
+    )
+    
+    db.commit()
+    
+    logger.info(
+        "Composition feedback recorded",
+        extra={
+            "user_id": str(current_user.id),
+            "session_id": str(session_id),
+            "composition_id": request.composition_id,
+            "composition_action": request.composition_action
+        }
+    )
+    
+    response_data = {"success": True, "message": "Composition feedback recorded"}
+    
+    # Handle different actions
+    if request.composition_action == "order_all":
+        response_data["message"] = "Ready to order! All items accepted."
+        response_data["next_action"] = "complete_session"
+        
+    elif request.composition_action == "regenerate_all":
+        response_data["message"] = "Generating completely new recommendations..."
+        response_data["next_action"] = "fetch_next"
+        
+    elif request.composition_action == "regenerate_partial":
+        # Count accepted vs rejected
+        accepted_courses = []
+        rejected_courses = []
+        
+        for course, feedback_type in [
+            ("appetizer", request.appetizer_feedback),
+            ("main", request.main_feedback),
+            ("dessert", request.dessert_feedback)
+        ]:
+            if feedback_type == FeedbackType.ACCEPTED:
+                accepted_courses.append(course)
+            else:
+                rejected_courses.append(course)
+        
+        response_data["message"] = f"Keeping {len(accepted_courses)} item(s), regenerating {len(rejected_courses)} item(s)..."
+        response_data["accepted_courses"] = accepted_courses
+        response_data["rejected_courses"] = rejected_courses
+        response_data["next_action"] = "fetch_next"
+    
+    return response_data
 
 
 @router.post("/{session_id}/complete")

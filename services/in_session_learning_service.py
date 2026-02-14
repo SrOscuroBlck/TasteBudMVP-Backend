@@ -3,6 +3,7 @@ from typing import Dict, List
 from collections import Counter
 
 from models import User, MenuItem, RecommendationSession, RecommendationFeedback
+from models.user import TASTE_AXES
 from services.features import cosine_similarity
 from utils.logger import setup_logger
 
@@ -19,7 +20,8 @@ class InSessionLearningService:
         if not session_feedback:
             return {}
         
-        adjustments = {axis: 0.0 for axis in user.taste_vector.keys()}
+        # Use TASTE_AXES to ensure Phase 1 compliant axis names
+        adjustments = {axis: 0.0 for axis in TASTE_AXES}
         
         liked_items = [
             fb for fb in session_feedback
@@ -48,16 +50,17 @@ class InSessionLearningService:
         feedback_type: str,
         weight: float = 0.1
     ) -> Dict[str, float]:
-        adjusted = user_taste_vector.copy()
+        # Start with Phase 1 compliant axes
+        adjusted = {axis: user_taste_vector.get(axis, 0.5) for axis in TASTE_AXES}
         
         if feedback_type == "dislike":
             for axis, value in item_features.items():
-                if axis in adjusted and value > 0.6:
+                if axis in TASTE_AXES and value > 0.6:
                     adjusted[axis] = max(0.0, adjusted[axis] - weight * value)
         
         elif feedback_type in ["like", "save_for_later"]:
             for axis, value in item_features.items():
-                if axis in adjusted and value > 0.6:
+                if axis in TASTE_AXES and value > 0.6:
                     adjusted[axis] = min(1.0, adjusted[axis] + weight * 0.5 * value)
         
         return adjusted
@@ -123,7 +126,8 @@ class InSessionLearningService:
         session_feedback: List[RecommendationFeedback],
         items_map: Dict[str, MenuItem]
     ) -> Dict[str, any]:
-        taste_adjustments = {axis: 0.0 for axis in user.taste_vector.keys()}
+        # Use TASTE_AXES to ensure we only use Phase 1 compliant axis names
+        taste_adjustments = {axis: 0.0 for axis in TASTE_AXES}
         cuisine_adjustments = self.detect_cuisine_preferences(session_feedback, items_map)
         
         disliked_items = [

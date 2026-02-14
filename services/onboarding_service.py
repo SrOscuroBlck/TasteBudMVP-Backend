@@ -2,11 +2,15 @@ from __future__ import annotations
 from typing import Dict, Any, List
 from uuid import uuid4
 from datetime import datetime
-from sqlmodel import Session, select
+from sqlmodel import Session, select, select
 from config.settings import settings
 from models import User, OnboardingState, PopulationStats
+from models.user import TASTE_AXES
+from models.bayesian_profile import BayesianTasteProfile
 from .features import clamp01
 from .gpt_helper import generate_onboarding_question
+from .archetype_service import get_archetype_by_id, find_closest_archetype
+from .bayesian_profile_service import BayesianProfileService
 
 
 FALLBACK_QUESTIONS = [
@@ -83,29 +87,53 @@ class OnboardingService:
             session.add(prev_state)
         session.commit()
         
-        # initialize vectors from priors
-        priors = session.exec(select(PopulationStats)).first()
+        # Initialize taste vector from archetype if available
+        archetype = None
+        if user.taste_archetype_id:
+            try:
+                archetype = get_archetype_by_id(session, user.taste_archetype_id)
+            except Exception:
+                archetype = None
         
-        # Define default axes
-        default_axes = ["sweet", "sour", "salty", "bitter", "umami", "spicy", "fattiness", "acidity", "crunch", "temp_hot"]
+        # If no archetype assigned, try to find closest match
+        if not archetype:
+            try:
+                user_preferences = {}
+                archetype = find_closest_archetype(session, user_preferences)
+                user.taste_archetype_id = archetype.id
+            except Exception:
+                archetype = None
         
         # Initialize taste_vector
         if not user.taste_vector:
-            if priors and priors.axis_prior_mean:
-                user.taste_vector = dict(priors.axis_prior_mean)
+            if archetype:
+                user.taste_vector = dict(archetype.taste_vector)
             else:
-                user.taste_vector = {k: 0.5 for k in default_axes}
+                priors = session.exec(select(PopulationStats)).first()
+                if priors and priors.axis_prior_mean:
+                    user.taste_vector = dict(priors.axis_prior_mean)
+                else:
+                    user.taste_vector = {k: 0.5 for k in TASTE_AXES}
         
-        # Initialize taste_uncertainty
+        # Initialize taste_uncertainty with moderate uncertainty for archetype-based initialization
         if not user.taste_uncertainty:
-            if priors and priors.axis_prior_sigma:
-                user.taste_uncertainty = dict(priors.axis_prior_sigma)
+            if archetype:
+                user.taste_uncertainty = {k: 0.3 for k in TASTE_AXES}
             else:
-                user.taste_uncertainty = {k: 0.5 for k in default_axes}
+                priors = session.exec(select(PopulationStats)).first()
+                if priors and priors.axis_prior_sigma:
+                    user.taste_uncertainty = dict(priors.axis_prior_sigma)
+                else:
+                    user.taste_uncertainty = {k: 0.5 for k in TASTE_AXES}
         
         # Initialize cuisine_affinity
-        if not user.cuisine_affinity and priors and priors.cuisine_prior:
-            user.cuisine_affinity = dict(priors.cuisine_prior)
+        if not user.cuisine_affinity:
+            if archetype and archetype.typical_cuisines:
+                user.cuisine_affinity = {cuisine: 0.7 for cuisine in archetype.typical_cuisines}
+            else:
+                priors = session.exec(select(PopulationStats)).first()
+                if priors and priors.cuisine_prior:
+                    user.cuisine_affinity = dict(priors.cuisine_prior)
         
         state = OnboardingState(user_id=user.id, active=True, answered_pairs=[], pending_axis_targets=self._top_uncertain_axes(user), confidence=0.0)
         session.add(state)
@@ -173,6 +201,9 @@ class OnboardingService:
             
             # Calculate cuisine affinity from chosen ingredients
             self._calculate_cuisine_affinity_from_choices(user, state, session)
+            
+            # Create Bayesian profile for new user
+            self._ensure_bayesian_profile(user, session)
             
             return {"complete": True}
         return self._next_question(session, user, state)
@@ -278,4 +309,17 @@ class OnboardingService:
         
         user.cuisine_affinity = cuisine_affinity
         session.add(user)
+        session.commit()
+    
+    def _ensure_bayesian_profile(self, user: User, session: Session) -> None:
+        existing_profile = session.exec(
+            select(BayesianTasteProfile).where(BayesianTasteProfile.user_id == user.id)
+        ).first()
+        
+        if existing_profile:
+            return
+        
+        bayesian_service = BayesianProfileService()
+        profile = bayesian_service.create_profile_from_user(session, user)
+        session.add(profile)
         session.commit()

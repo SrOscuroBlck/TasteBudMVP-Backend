@@ -168,17 +168,24 @@ class InteractionHistoryService:
         user_history: Optional[UserItemInteractionHistory]
     ) -> float:
         """
-        Calculate novelty bonus for an item based on interaction history.
+        Calculate novelty bonus/penalty for an item based on interaction history.
         
         Returns:
         - Never seen: +0.3
+        - Previously disliked/skipped: -0.8 (STRONG PENALTY)
+        - Ordered and liked: +0.1 (familiarity bonus)
         - Seen 1-2 times: +0.1
         - Seen 3-5 times: 0.0
-        - Seen 6+ times: -0.2 (unless ordered and liked)
+        - Seen 6+ times: -0.2
         """
         if not user_history:
             return 0.3
         
+        # CRITICAL: Penalize items user explicitly disliked or rejected
+        if user_history.was_disliked:
+            return -0.8
+        
+        # Reward items user liked and ordered
         if user_history.was_ordered and user_history.was_liked:
             return 0.1
         

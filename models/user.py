@@ -7,7 +7,11 @@ from sqlalchemy import Column, JSON
 
 
 TASTE_AXES = [
-    "sweet","sour","salty","bitter","umami","spicy","fattiness","acidity","crunch","temp_hot"
+    "sweet", "sour", "salty", "bitter", "umami", "fatty", "spicy"
+]
+
+TEXTURE_AXES = [
+    "crunchy", "creamy", "chewy"
 ]
 
 
@@ -61,7 +65,9 @@ class User(SQLModel, table=True):
 
     taste_vector: Dict[str, float] = Field(default_factory=lambda: {k: 0.5 for k in TASTE_AXES}, sa_column=Column(JSON))
     taste_uncertainty: Dict[str, float] = Field(default_factory=lambda: {k: 0.5 for k in TASTE_AXES}, sa_column=Column(JSON))
+    taste_archetype_id: Optional[UUID] = Field(default=None, index=True)
     cuisine_affinity: Dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON))
+    ingredient_penalties: Dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON))
     
     permanently_excluded_items: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 

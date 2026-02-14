@@ -35,6 +35,10 @@ class Settings:
     LAMBDA_POP: float = float(os.getenv("LAMBDA_POP", "0.2"))
     MMR_ALPHA: float = float(os.getenv("MMR_ALPHA", "0.7"))
     GPT_CONFIDENCE_DISCOUNT: float = float(os.getenv("GPT_CONFIDENCE_DISCOUNT", "0.3"))
+    EXPLORATION_COEFFICIENT: float = float(os.getenv("EXPLORATION_COEFFICIENT", "0.2"))
+
+    # Temporal decay
+    FEEDBACK_HALF_LIFE_DAYS: int = int(os.getenv("FEEDBACK_HALF_LIFE_DAYS", "21"))
 
     # Popularity
     DECAY_HALF_LIFE_DAYS: int = int(os.getenv("DECAY_HALF_LIFE_DAYS", "30"))
@@ -55,6 +59,28 @@ class Settings:
     # OTP
     OTP_EXPIRE_MINUTES: int = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
     OTP_MAX_ATTEMPTS: int = int(os.getenv("OTP_MAX_ATTEMPTS", "3"))
+    
+    # Phase 3: Query-based recommendations
+    QUERY_RETRIEVAL_CANDIDATES_MULTIPLIER: int = int(os.getenv("QUERY_RETRIEVAL_CANDIDATES_MULTIPLIER", "3"))
+    QUERY_DEFAULT_DIVERSITY_WEIGHT: float = float(os.getenv("QUERY_DEFAULT_DIVERSITY_WEIGHT", "0.3"))
+    QUERY_ENABLE_CROSS_ENCODER: bool = os.getenv("QUERY_ENABLE_CROSS_ENCODER", "False").lower() == "true"
+    QUERY_CROSS_ENCODER_MODEL: str = os.getenv("QUERY_CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+    
+    # Phase 3: MMR diversity
+    MMR_DEFAULT_DIVERSITY_WEIGHT: float = float(os.getenv("MMR_DEFAULT_DIVERSITY_WEIGHT", "0.3"))
+    MMR_MAX_ITEMS_PER_CUISINE: Optional[int] = int(os.getenv("MMR_MAX_ITEMS_PER_CUISINE")) if os.getenv("MMR_MAX_ITEMS_PER_CUISINE") else None
+    MMR_MAX_ITEMS_PER_RESTAURANT: Optional[int] = int(os.getenv("MMR_MAX_ITEMS_PER_RESTAURANT")) if os.getenv("MMR_MAX_ITEMS_PER_RESTAURANT") else None
+    
+    # MMR in main recommendation flow
+    USE_MMR_DIVERSITY: bool = os.getenv("USE_MMR_DIVERSITY", "True").lower() == "true"
+    RECOMMENDATION_DIVERSITY_WEIGHT: float = float(os.getenv("RECOMMENDATION_DIVERSITY_WEIGHT", "0.2"))
+    
+    # Phase 4: Explanations & Evaluation
+    EXPLANATION_USE_LLM_FIRST: bool = os.getenv("EXPLANATION_USE_LLM_FIRST", "True").lower() == "true"
+    EXPLANATION_MAX_HISTORY_ITEMS: int = int(os.getenv("EXPLANATION_MAX_HISTORY_ITEMS", "5"))
+    
+    EVALUATION_MIN_AB_TEST_SAMPLES: int = int(os.getenv("EVALUATION_MIN_AB_TEST_SAMPLES", "30"))
+    EVALUATION_DEFAULT_TIME_PERIOD_DAYS: int = int(os.getenv("EVALUATION_DEFAULT_TIME_PERIOD_DAYS", "30"))
 
 
 settings = Settings()

@@ -76,11 +76,11 @@ class ContextEnhancementService:
         
         course_mapping = {
             "full_meal": ["appetizer", "main", "entree", "dinner", "dessert"],
-            "appetizer": ["appetizer", "starter", "salad", "soup"],
-            "main": ["main", "entree", "dinner"],
-            "dessert": ["dessert", "sweet"],
-            "beverage": ["beverage", "drink"],
-            "snack": ["appetizer", "snack", "side", "small plate"]
+            "appetizer_only": ["appetizer", "starter", "salad", "soup"],
+            "main_only": ["main", "entree", "dinner"],
+            "dessert_only": ["dessert", "sweet"],
+            "beverage_only": ["beverage", "drink"],
+            "light_snack": ["appetizer", "snack", "side", "small plate"]
         }
         
         allowed_courses = course_mapping.get(meal_intent, [])

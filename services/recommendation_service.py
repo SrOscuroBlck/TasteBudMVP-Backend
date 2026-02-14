@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from uuid import UUID
 from sqlmodel import Session, select
-from models import User, MenuItem, PopulationStats, RecommendationSession, RecommendationFeedback, UserOrderHistory
+from models import User, MenuItem, PopulationStats, RecommendationSession, RecommendationFeedback, UserOrderHistory, BayesianTasteProfile
+from models.query import ParsedQuery
 from .features import cosine_similarity, has_allergen, violates_diet
 from .gpt_helper import generate_rationale
 from .retrieval_service import RetrievalService
@@ -15,6 +16,11 @@ from .meal_composition_service import MealCompositionService
 from .explanation_enhancement_service import ExplanationEnhancementService
 from .interaction_history_service import InteractionHistoryService
 from .confidence_service import ConfidenceService
+from .query_service import QueryParsingService
+from .mmr_service import MMRService, DiversityConstraints
+from .cross_encoder_service import CrossEncoderService
+from .session_service import RecommendationSessionService
+from .bayesian_profile_service import BayesianProfileService
 from config.settings import settings
 import math
 from datetime import datetime
@@ -44,6 +50,10 @@ class RecommendationService:
         self.explanation_enhancement = ExplanationEnhancementService()
         self.interaction_history_service = InteractionHistoryService()
         self.confidence_service = ConfidenceService()
+        self.query_parsing_service = QueryParsingService()
+        self.mmr_service = MMRService()
+        self.cross_encoder_service = CrossEncoderService()
+        self.bayesian_profile_service = BayesianProfileService()
     
     def recommend(
         self,
@@ -96,7 +106,9 @@ class RecommendationService:
                 user=user,
                 k=max(top_n * 3, 30),
                 restaurant_id=restaurant_id,
-                budget=budget
+                budget=budget,
+                course_filter=course_preference,
+                time_of_day=time_of_day
             )
         except Exception as e:
             logger.error(
@@ -206,6 +218,129 @@ class RecommendationService:
         )
         
         return {"items": results}
+    
+    def recommend_from_query(
+        self,
+        session: Session,
+        user: User,
+        query: str,
+        top_n: int = 10,
+        budget: Optional[float] = None,
+        diversity_weight: float = 0.3,
+        use_cross_encoder: bool = False,
+        diversity_constraints: Optional[DiversityConstraints] = None
+    ) -> Dict[str, Any]:
+        if not query:
+            raise ValueError("query cannot be empty")
+        
+        if not self.use_new_pipeline:
+            raise ValueError("query-based recommendations require new pipeline (use_new_pipeline=True)")
+        
+        logger.info(
+            "Generating query-based recommendations",
+            extra={
+                "user_id": str(user.id),
+                "query": query,
+                "top_n": top_n,
+                "diversity_weight": diversity_weight,
+                "use_cross_encoder": use_cross_encoder
+            }
+        )
+        
+        try:
+            parsed_query = self.query_parsing_service.parse_query(query)
+            
+            logger.info(
+                "Query parsed",
+                extra={
+                    "intent": parsed_query.intent.value,
+                    "modifiers": [m.value for m in parsed_query.modifiers]
+                }
+            )
+            
+            candidates = self.retrieval_service.retrieve_candidates_from_query(
+                session=session,
+                user=user,
+                parsed_query=parsed_query,
+                k=max(top_n * 3, 50),
+                budget=budget
+            )
+            
+            if not candidates:
+                return {
+                    "items": [],
+                    "warnings": ["no_candidates_found"],
+                    "query_info": {
+                        "raw_query": query,
+                        "intent": parsed_query.intent.value,
+                        "modifiers": [m.value for m in parsed_query.modifiers]
+                    }
+                }
+            
+            if use_cross_encoder and self.cross_encoder_service.is_available:
+                logger.info("Applying cross-encoder reranking")
+                scored_candidates = self.cross_encoder_service.rerank_parsed_query_results(
+                    parsed_query=parsed_query,
+                    candidates=candidates,
+                    top_k=min(len(candidates), top_n * 2)
+                )
+                candidates = [item for item, score in scored_candidates]
+            
+            if diversity_weight > 0:
+                logger.info("Applying MMR diversity reranking")
+                final_items = self.mmr_service.rerank_with_mmr(
+                    candidates=candidates,
+                    user_taste_vector=user.taste_vector,
+                    k=top_n,
+                    diversity_weight=diversity_weight,
+                    constraints=diversity_constraints
+                )
+            else:
+                final_items = candidates[:top_n]
+            
+            results = []
+            for item in final_items:
+                item_data = {
+                    "item_id": str(item.id),
+                    "name": item.name,
+                    "description": item.description,
+                    "course": item.course,
+                    "price": item.price,
+                    "cuisine": item.cuisine,
+                    "dietary_tags": item.dietary_tags,
+                    "features": item.features,
+                    "explanation": f"Matches your query: {query}"
+                }
+                results.append(item_data)
+            
+            logger.info(
+                "Query-based recommendations generated successfully",
+                extra={
+                    "user_id": str(user.id),
+                    "query": query,
+                    "result_count": len(results)
+                }
+            )
+            
+            return {
+                "items": results,
+                "query_info": {
+                    "raw_query": query,
+                    "intent": parsed_query.intent.value,
+                    "modifiers": [m.value for m in parsed_query.modifiers],
+                    "cuisine_filter": parsed_query.cuisine_filter,
+                    "taste_adjustments": parsed_query.taste_adjustments
+                },
+                "diversity_score": self.mmr_service._compute_diversity_score(final_items) if diversity_weight > 0 else None
+            }
+            
+        except Exception as e:
+            logger.error(
+                "Query-based recommendation failed",
+                extra={"error": str(e), "query": query},
+                exc_info=True
+            )
+            raise
     
     def _recommend_legacy(
         self,
@@ -348,44 +483,84 @@ class RecommendationService:
         safe: List[MenuItem] = []
         user_all = set(map(str.lower, user.allergies))
         
+        filtered_counts = {
+            "allergen": 0,
+            "diet": 0,
+            "budget": 0,
+            "session_excluded": 0,
+            "permanently_excluded": 0
+        }
+        
         logger.info(
             "Starting safety filtering",
             extra={
                 "user_id": str(user.id),
+                "session_id": str(recommendation_session.id),
                 "total_items": len(all_items),
-                "permanently_excluded_count": len(user.permanently_excluded_items),
-                "permanently_excluded_items": user.permanently_excluded_items
+                "user_allergies": list(user.allergies),
+                "user_dietary_rules": list(user.dietary_rules),
+                "session_excluded_count": len(recommendation_session.excluded_items),
+                "permanently_excluded_count": len(user.permanently_excluded_items)
             }
         )
         
         for it in all_items:
             if user_all.intersection(set(map(str.lower, it.allergens))):
+                filtered_counts["allergen"] += 1
                 continue
             if has_allergen(user.allergies, it.ingredients, explicit_allergens=it.allergens):
+                filtered_counts["allergen"] += 1
                 continue
             if violates_diet(user.dietary_rules, it.dietary_tags):
+                filtered_counts["diet"] += 1
                 continue
             if recommendation_session.budget and it.price and it.price > recommendation_session.budget * 1.2:
+                filtered_counts["budget"] += 1
                 continue
             
             item_id_str = str(it.id)
             if item_id_str in recommendation_session.excluded_items:
+                filtered_counts["session_excluded"] += 1
                 continue
             
             if item_id_str in user.permanently_excluded_items:
-                logger.debug(
-                    "Item filtered - permanently excluded",
-                    extra={"item_id": item_id_str, "item_name": it.name}
-                )
+                filtered_counts["permanently_excluded"] += 1
                 continue
             
             safe.append(it)
         
+        logger.info(
+            "Safety filtering completed",
+            extra={
+                "user_id": str(user.id),
+                "session_id": str(recommendation_session.id),
+                "initial_count": len(all_items),
+                "safe_count": len(safe),
+                "filtered_by_allergen": filtered_counts["allergen"],
+                "filtered_by_diet": filtered_counts["diet"],
+                "filtered_by_budget": filtered_counts["budget"],
+                "filtered_by_session_exclusion": filtered_counts["session_excluded"],
+                "filtered_by_permanent_exclusion": filtered_counts["permanently_excluded"]
+            }
+        )
+        
         if not safe:
+            logger.warning(
+                "No safe items after filtering",
+                extra={
+                    "user_id": str(user.id),
+                    "session_id": str(recommendation_session.id),
+                    "filtered_counts": filtered_counts
+                }
+            )
             return {"items": [], "warnings": ["no_safe_items"]}
         
-        # Don't apply strict time filtering for full_meal (user wants to see everything)
-        apply_strict_time_filter = recommendation_session.meal_intent != "full_meal"
+        # Skip time filtering for intents that need items from all time periods:
+        # - full_meal: needs appetizer + main + dessert (dessert blocked during breakfast)
+        # - dessert_only/beverage_only: can be consumed anytime
+        # Apply time filtering only for single-course intents that should match time of day
+        skip_time_filter_intents = ["full_meal", "dessert_only", "beverage_only"]
+        apply_strict_time_filter = recommendation_session.meal_intent not in skip_time_filter_intents
         
         time_filtered = self.context_service.apply_hard_time_filters(
             safe,
@@ -393,10 +568,37 @@ class RecommendationService:
             strict=apply_strict_time_filter
         )
         
+        logger.info(
+            "Time filtering completed",
+            extra={
+                "user_id": str(user.id),
+                "session_id": str(recommendation_session.id),
+                "before_count": len(safe),
+                "after_count": len(time_filtered),
+                "filtered_count": len(safe) - len(time_filtered),
+                "time_of_day": recommendation_session.time_of_day,
+                "detected_hour": recommendation_session.detected_hour,
+                "strict_filtering": apply_strict_time_filter
+            }
+        )
+        
         intent_filtered = self.context_service.apply_meal_intent_filters(
             time_filtered,
             recommendation_session.meal_intent,
             recommendation_session.hunger_level
+        )
+        
+        logger.info(
+            "Intent filtering completed",
+            extra={
+                "user_id": str(user.id),
+                "session_id": str(recommendation_session.id),
+                "before_count": len(time_filtered),
+                "after_count": len(intent_filtered),
+                "filtered_count": len(time_filtered) - len(intent_filtered),
+                "meal_intent": recommendation_session.meal_intent,
+                "hunger_level": recommendation_session.hunger_level
+            }
         )
         
         order_history = session.exec(
@@ -410,6 +612,17 @@ class RecommendationService:
         )
         
         candidates = [item for item, _ in scored_with_penalty]
+        
+        logger.info(
+            "Repeat penalty applied and candidates finalized",
+            extra={
+                "user_id": str(user.id),
+                "session_id": str(recommendation_session.id),
+                "candidate_count": len(candidates),
+                "order_history_count": len(order_history),
+                "days_threshold": 30
+            }
+        )
         
         session_feedback = session.exec(
             select(RecommendationFeedback).where(
@@ -425,7 +638,37 @@ class RecommendationService:
             items_map
         )
         
-        adjusted_taste_vector = user.taste_vector.copy()
+        # Load Bayesian profile (Phase 2 learning system)
+        # Create profile on-demand if it doesn't exist
+        bayesian_profile = self.bayesian_profile_service.get_or_create_profile(session, user)
+        
+        # INTELLIGENT EXPLORATION: Use Thompson Sampling for diversity BUT
+        # blend with learned means to keep exploration centered on user preferences
+        # This gives variety while respecting what user likes
+        sampled_vector = bayesian_profile.sample_taste_preferences()
+        mean_vector = bayesian_profile.mean_preferences.copy()
+        
+        # Blend: 70% learned preference + 30% exploration
+        # This ensures recommendations vary but stay close to what user likes
+        base_taste_vector = {
+            axis: 0.7 * mean_vector.get(axis, 0.5) + 0.3 * sampled_vector.get(axis, 0.5)
+            for axis in sampled_vector.keys()
+        }
+        
+        logger.info(
+            "Using controlled Thompson Sampling (70% learned + 30% exploration)",
+            extra={
+                "user_id": str(user.id),
+                "session_id": str(recommendation_session.id),
+                "profile_id": str(bayesian_profile.id),
+                "mean_vector": {k: round(v, 3) for k, v in mean_vector.items()},
+                "sampled_vector": {k: round(v, 3) for k, v in sampled_vector.items()},
+                "final_vector": {k: round(v, 3) for k, v in base_taste_vector.items()}
+            }
+        )
+        
+        # Apply in-session adjustments on top of the base vector
+        adjusted_taste_vector = base_taste_vector.copy()
         for axis, adjustment in profile_adjustments["taste_adjustments"].items():
             adjusted_taste_vector[axis] = max(0.0, min(1.0, adjusted_taste_vector[axis] + adjustment))
         
@@ -442,6 +685,14 @@ class RecommendationService:
         for it in candidates:
             s = cosine_similarity(adjusted_taste_vector, it.features)
             
+            # Apply cuisine affinity from Bayesian profile (persistent learning across sessions)
+            for cuisine in it.cuisine:
+                cuisine_pref = bayesian_profile.get_cuisine_preference(cuisine)
+                # Convert 0-1 preference to stronger adjustment (Phase 2 Bayesian learning)
+                cuisine_bonus = (cuisine_pref - 0.5) * 2.0 * settings.LAMBDA_CUISINE
+                s += cuisine_bonus
+            
+            # Then apply in-session adjustments (temporary within session)
             for cuisine, adjustment in profile_adjustments["cuisine_adjustments"].items():
                 if cuisine in it.cuisine:
                     s += adjustment * settings.LAMBDA_CUISINE
@@ -460,21 +711,109 @@ class RecommendationService:
             novelty_bonus = self.interaction_history_service.calculate_novelty_bonus(
                 user_interaction_history.get(it.id)
             )
-            s += novelty_bonus * 0.2
+            # Apply AGGRESSIVE penalty for disliked items (Bayesian learning
+            # handles long-term preferences, this handles explicit rejections)
+            # User explicitly rejected this - make it VERY unlikely to appear again
+            if novelty_bonus < -0.5:
+                s += novelty_bonus * 5.0  # Massive penalty for explicit dislikes/skips
+            elif novelty_bonus < 0:
+                s += novelty_bonus * 2.0  # Strong penalty for negative signals
+            else:
+                s += novelty_bonus * 0.2  # Scaled bonus for positive/neutral
+            
+            # Apply ingredient-level penalties for cross-restaurant learning
+            # If user disliked items with mozzarella, penalize ALL mozzarella items
+            ingredient_penalty = self._calculate_ingredient_penalty(user, it)
+            if ingredient_penalty > 0:
+                s -= ingredient_penalty
             
             base_scores[str(it.id)] = max(0.0, min(1.0, s))
         
+        # CRITICAL: Sort candidates by base_scores to ensure highly-penalized items (disliked, skipped)
+        # are at the end. This ensures meal composition uses the best-scored items first.
+        candidates_sorted = sorted(
+            candidates,
+            key=lambda item: base_scores.get(str(item.id), 0.0),
+            reverse=True
+        )
+        
         if recommendation_session.meal_intent == "full_meal":
-            composition_result = self.meal_composition.compose_full_meal(
-                user,
-                candidates,
-                recommendation_session,
-                top_n=max(3, top_n // 3)
-            )
+            # Check if we need partial regeneration
+            validation_state = recommendation_session.composition_validation_state.get(
+                recommendation_session.active_composition_id or "", {}
+            ) if recommendation_session.active_composition_id else {}
+            
+            # Determine which courses need regeneration
+            accepted_items = {}
+            courses_to_regenerate = []
+            
+            for course in ["appetizer", "main", "dessert"]:
+                course_state = validation_state.get(course, {})
+                status = course_state.get("status", "")
+                
+                if status == "accepted":
+                    # Keep this item
+                    from uuid import UUID as UUIDType
+                    item_id = UUIDType(course_state.get("item_id"))
+                    item = session.get(MenuItem, item_id)
+                    if item:
+                        accepted_items[course] = item
+                else:
+                    courses_to_regenerate.append(course)
+            
+            # If we have accepted items, do partial regeneration
+            if accepted_items and courses_to_regenerate:
+                composition_result = self.meal_composition.compose_partial_meal(
+                    user,
+                    candidates_sorted,
+                    recommendation_session,
+                    accepted_items=accepted_items,
+                    courses_to_regenerate=courses_to_regenerate,
+                    top_n=max(3, top_n // 3)
+                )
+            else:
+                # Full composition generation
+                composition_result = self.meal_composition.compose_full_meal(
+                    user,
+                    candidates_sorted,
+                    recommendation_session,
+                    top_n=max(3, top_n // 3)
+                )
             
             if composition_result.compositions:
                 results = []
-                for comp in composition_result.compositions:
+                session_service = RecommendationSessionService()
+                
+                for idx, comp in enumerate(composition_result.compositions):
+                    # Set first composition as active
+                    if idx == 0:
+                        session_service.set_active_composition(
+                            db_session=session,
+                            session_id=recommendation_session.id,
+                            composition_id=comp.composition_id,
+                            appetizer_id=comp.appetizer.id,
+                            main_id=comp.main.id,
+                            dessert_id=comp.dessert.id
+                        )
+                    
+                    # Record all items in composition as shown for interaction history tracking
+                    for item in [comp.appetizer, comp.main, comp.dessert]:
+                        try:
+                            self.interaction_history_service.record_item_shown(
+                                db_session=session,
+                                user_id=user.id,
+                                item_id=item.id,
+                                session_id=recommendation_session.id
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to record composition item view",
+                                extra={
+                                    "item_id": str(item.id),
+                                    "error": str(e)
+                                }
+                            )
+                    
                     explanation = self.explanation_enhancement.generate_multi_course_explanation(
                         comp,
                         user,
@@ -496,8 +835,78 @@ class RecommendationService:
                 
                 return {"items": results, "type": "composition"}
             
-        sorted_items = sorted(candidates, key=lambda it: base_scores.get(str(it.id), 0.0), reverse=True)
-        top_items = sorted_items[:top_n]
+        # Apply MMR for diversity with configurable parameters
+        diversity_weight = getattr(settings, 'RECOMMENDATION_DIVERSITY_WEIGHT', 0.3)
+        use_mmr = getattr(settings, 'USE_MMR_DIVERSITY', True)
+        
+        # Create diversity constraints to prevent repetitive recommendations
+        constraints = DiversityConstraints(
+            max_items_per_cuisine=3,  # Max 3 items from same cuisine
+            max_items_per_restaurant=None,  # Restaurant filtered upstream
+            min_diversity_score=0.4  # Minimum acceptable diversity
+        )
+        
+        if use_mmr and len(candidates) > top_n:
+            logger.info(
+                "Applying MMR diversity reranking",
+                extra={
+                    "candidate_count": len(candidates),
+                    "top_n": top_n,
+                    "diversity_weight": diversity_weight,
+                    "user_id": str(user.id)
+                }
+            )
+            
+            # Use MMR to select diverse items
+            # CRITICAL: Pass base_scores so MMR uses penalized scores, not fresh cosine similarity
+            # This ensures dislike penalties, ingredient penalties, and novelty bonuses are preserved
+            top_items = self.mmr_service.rerank_with_mmr(
+                candidates=candidates,
+                user_taste_vector=adjusted_taste_vector,
+                k=top_n,
+                diversity_weight=diversity_weight,
+                constraints=constraints,
+                base_scores=base_scores
+            )
+            
+            final_diversity_score = self.mmr_service._compute_diversity_score(top_items)
+            
+            logger.info(
+                "MMR diversity reranking completed",
+                extra={
+                    "final_count": len(top_items),
+                    "diversity_score": round(final_diversity_score, 3),
+                    "session_id": str(recommendation_session.id)
+                }
+            )
+        else:
+            # Fallback: deterministic ranking by base_scores (no randomization)
+            logger.info(
+                "Using deterministic ranking",
+                extra={
+                    "candidate_count": len(candidates),
+                    "top_n": top_n,
+                    "reason": "too_few_candidates" if len(candidates) <= top_n else "mmr_disabled"
+                }
+            )
+            
+            # Sort by base_scores for consistent, personalized recommendations
+            sorted_items = sorted(
+                candidates,
+                key=lambda it: base_scores.get(str(it.id), 0.0),
+                reverse=True
+            )
+            top_items = sorted_items[:top_n]
+        
+        logger.info(
+            "Final recommendation set prepared",
+            extra={
+                "session_id": str(recommendation_session.id),
+                "user_id": str(user.id),
+                "item_count": len(top_items),
+                "iteration": recommendation_session.iteration_count
+            }
+        )
         
         for item in top_items:
             try:
@@ -587,4 +996,37 @@ class RecommendationService:
             "features": item.features,
             "safety_confidence": 1.0
         }
+    
+    def _calculate_ingredient_penalty(self, user: User, item: MenuItem) -> float:
+        if not hasattr(user, "ingredient_penalties") or not user.ingredient_penalties:
+            return 0.0
+        
+        if not item.ingredients:
+            return 0.0
+        
+        total_penalty = 0.0
+        matching_ingredients = []
+        
+        # Check item's ingredients against user's learned ingredient penalties
+        for ingredient in item.ingredients[:10]:  # Check top 10 ingredients
+            ingredient_lower = ingredient.lower().strip()
+            if ingredient_lower in user.ingredient_penalties:
+                penalty = user.ingredient_penalties[ingredient_lower]
+                total_penalty += penalty
+                matching_ingredients.append(f"{ingredient_lower}({penalty:.2f})")
+        
+        if total_penalty > 0:
+            logger.debug(
+                "Applied ingredient penalty",
+                extra={
+                    "user_id": str(user.id),
+                    "item_id": str(item.id),
+                    "item_name": item.name,
+                    "total_penalty": round(total_penalty, 3),
+                    "matching_ingredients": matching_ingredients
+                }
+            )
+        
+        # Scale penalty: each disliked ingredient contributes, but cap at 0.5 total
+        return min(0.5, total_penalty * 0.1)
 

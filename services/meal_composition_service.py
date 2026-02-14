@@ -93,6 +93,133 @@ class MealCompositionService:
             compositions=combinations[:top_n]
         )
     
+    def compose_partial_meal(
+        self,
+        user: User,
+        candidates: List[MenuItem],
+        session_context: RecommendationSession,
+        accepted_items: Dict[str, MenuItem],  # {course: MenuItem} for accepted courses
+        courses_to_regenerate: List[str], # ["appetizer", "dessert"] etc
+        top_n: int = 3
+    ) -> FullMealComposition:
+        """
+        Generate new compositions while keeping user-accepted items.
+        Only regenerate the rejected courses.
+        """
+        logger.info(
+            "Partial meal composition",
+            extra={
+                "session_id": str(session_context.id),
+                "accepted_courses": list(accepted_items.keys()),
+                "regenerating_courses": courses_to_regenerate
+            }
+        )
+        
+        # Separate accepted and to-regenerate courses
+        course_pools = {
+            "appetizer": accepted_items.get("appetizer"),
+            "main": accepted_items.get("main"),
+            "dessert": accepted_items.get("dessert")
+        }
+        
+        # Build candidate pools for courses to regenerate
+        for course_key in courses_to_regenerate:
+            if course_key == "appetizer":
+                pool = [
+                    item for item in candidates
+                    if item.course and any(c in item.course.lower() for c in ["appetizer", "starter", "salad", "soup"])
+                ]
+            elif course_key == "main":
+                pool = [
+                    item for item in candidates
+                    if item.course and any(c in item.course.lower() for c in ["main", "entree", "dinner"])
+                ]
+            elif course_key == "dessert":
+                pool = [
+                    item for item in candidates
+                    if item.course and "dessert" in item.course.lower()
+                ]
+            else:
+                pool = []
+            
+            course_pools[course_key] = pool[:10] if len(pool) > 1 else pool
+        
+        # Generate combinations
+        combinations = []
+        
+        # Convert single items and lists to iterable
+        appetizer_options = [course_pools["appetizer"]] if isinstance(course_pools["appetizer"], MenuItem) else course_pools.get("appetizer", [])
+        main_options = [course_pools["main"]] if isinstance(course_pools["main"], MenuItem) else course_pools.get("main", [])
+        dessert_options = [course_pools["dessert"]] if isinstance(course_pools["dessert"], MenuItem) else course_pools.get("dessert", [])
+        
+        if not appetizer_options or not main_options or not dessert_options:
+            return FullMealComposition(
+                compositions=[],
+                message="Not enough options to regenerate composition"
+            )
+        
+        for appetizer in appetizer_options[:5]:
+            for main in main_options[:5]:
+                for dessert in dessert_options[:3]:
+                    total_price = (
+                        (appetizer.price or 0) +
+                        (main.price or 0) +
+                        (dessert.price or 0)
+                    )
+                    
+                    if session_context.budget and total_price > session_context.budget * 1.15:
+                        continue
+                    
+                    harmony_score = self.calculate_flavor_harmony([appetizer, main, dessert])
+                    duration = self.estimate_meal_duration([appetizer, main, dessert])
+                    
+                    cooking_methods = {
+                        appetizer.cooking_method,
+                        main.cooking_method,
+                        dessert.cooking_method
+                    }
+                    variety_bonus = len([m for m in cooking_methods if m]) / 3.0
+                    
+                    overall_score = harmony_score * 0.7 + variety_bonus * 0.3
+                    
+                    # Bonus for keeping user's accepted items
+                    if "appetizer" in accepted_items or "main" in accepted_items or "dessert" in accepted_items:
+                        overall_score *= 1.1
+                    
+                    combination = CourseCombination(
+                        composition_id=str(uuid4()),
+                        appetizer=appetizer,
+                        main=main,
+                        dessert=dessert,
+                        total_price=total_price,
+                        estimated_duration_minutes=duration,
+                        flavor_harmony_score=harmony_score,
+                        overall_score=overall_score
+                    )
+                    
+                    combinations.append(combination)
+        
+        if not combinations:
+            return FullMealComposition(
+                compositions=[],
+                message="Could not find compatible partial combinations"
+            )
+        
+        combinations.sort(key=lambda x: x.overall_score, reverse=True)
+        
+        logger.info(
+            "Partial meal compositions created",
+            extra={
+                "session_id": str(session_context.id),
+                "combinations": len(combinations),
+                "returning": min(top_n, len(combinations))
+            }
+        )
+        
+        return FullMealComposition(
+            compositions=combinations[:top_n]
+        )
+    
     def find_compatible_courses(
         self,
         appetizers: List[MenuItem],

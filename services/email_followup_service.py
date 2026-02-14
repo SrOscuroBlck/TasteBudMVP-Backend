@@ -56,7 +56,7 @@ class EmailFollowUpService:
         
         context = {
             "user_name": user.email.split("@")[0],
-            "meal_intent": rec_session.meal_intent.value,
+            "meal_intent": rec_session.meal_intent,
             "selected_items": selected_items,
             "feedback_link": self._generate_feedback_link(token),
             "token": token

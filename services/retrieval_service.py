@@ -1,10 +1,12 @@
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Dict
 from uuid import UUID
 from sqlmodel import Session, select
 from datetime import datetime, timedelta
 
 from models import MenuItem, User, Rating
+from models.query import ParsedQuery
 from services.faiss_service import FAISSService
+from services.embedding_service import EmbeddingService
 from services.features import has_allergen, violates_diet, cosine_similarity
 from config.settings import settings
 from utils.logger import setup_logger
@@ -15,6 +17,7 @@ logger = setup_logger(__name__)
 class RetrievalService:
     def __init__(self, faiss_service: Optional[FAISSService] = None):
         self.faiss_service = faiss_service or FAISSService()
+        self.embedding_service = EmbeddingService()
         self._faiss_loaded = False
         
     def _ensure_faiss_loaded(self) -> bool:
@@ -43,21 +46,24 @@ class RetrievalService:
         restaurant_id: Optional[str] = None,
         budget: Optional[float] = None,
         use_faiss: bool = True,
-        exclude_recent_days: int = 2
+        exclude_recent_days: int = 2,
+        course_filter: Optional[str] = None,
+        time_of_day: Optional[str] = None
     ) -> List[MenuItem]:
         if not user.taste_vector:
             raise ValueError("user taste_vector is required for retrieval")
         
-        # Get recently interacted items to exclude
         recent_item_ids = self._get_recent_item_ids(session, user, days=exclude_recent_days)
         
         if use_faiss and self._ensure_faiss_loaded():
             return self._retrieve_with_faiss(
-                session, user, k, restaurant_id, budget, recent_item_ids
+                session, user, k, restaurant_id, budget, recent_item_ids,
+                course_filter, time_of_day
             )
         else:
             return self._retrieve_with_sql(
-                session, user, k, restaurant_id, budget, recent_item_ids
+                session, user, k, restaurant_id, budget, recent_item_ids,
+                course_filter, time_of_day
             )
     
     def _retrieve_with_faiss(
@@ -67,7 +73,9 @@ class RetrievalService:
         k: int,
         restaurant_id: Optional[str],
         budget: Optional[float],
-        recent_item_ids: Set[UUID]
+        recent_item_ids: Set[UUID],
+        course_filter: Optional[str] = None,
+        time_of_day: Optional[str] = None
     ) -> List[MenuItem]:
         embedding_field = "reduced_embedding" if settings.FAISS_DIMENSION == 64 else "embedding"
         
@@ -128,7 +136,11 @@ class RetrievalService:
             filtered_by_recency, user, budget
         )
         
-        return filtered_items[:k]
+        course_filtered = self._apply_course_filter(
+            filtered_items, course_filter, time_of_day
+        )
+        
+        return course_filtered[:k]
     
     def _retrieve_with_sql(
         self,
@@ -137,7 +149,9 @@ class RetrievalService:
         k: int,
         restaurant_id: Optional[str],
         budget: Optional[float],
-        recent_item_ids: Set[UUID]
+        recent_item_ids: Set[UUID],
+        course_filter: Optional[str] = None,
+        time_of_day: Optional[str] = None
     ) -> List[MenuItem]:
         query = select(MenuItem)
         if restaurant_id:
@@ -155,8 +169,12 @@ class RetrievalService:
             non_recent_items, user, budget
         )
         
+        course_filtered = self._apply_course_filter(
+            filtered_items, course_filter, time_of_day
+        )
+        
         scored_items = []
-        for item in filtered_items:
+        for item in course_filtered:
             if not item.features:
                 continue
             score = cosine_similarity(user.taste_vector, item.features)
@@ -191,6 +209,91 @@ class RetrievalService:
             filtered.append(item)
         
         return filtered
+    
+    def _apply_course_filter(
+        self,
+        items: List[MenuItem],
+        course_filter: Optional[str],
+        time_of_day: Optional[str]
+    ) -> List[MenuItem]:
+        if not course_filter:
+            return items
+        
+        course_filter_lower = course_filter.lower()
+        
+        course_type_mapping = {
+            "appetizer": ["appetizer", "starter", "soup", "salad"],
+            "main": ["main", "entree", "dinner", "lunch"],
+            "main_course": ["main", "entree", "dinner", "lunch"],
+            "dessert": ["dessert", "sweet"],
+            "beverage": ["beverage", "drink"],
+            "snack": ["snack", "appetizer", "starter", "small plate"],
+            "full_meal": []
+        }
+        
+        if course_filter_lower == "full_meal":
+            return items
+        
+        allowed_courses = course_type_mapping.get(course_filter_lower, [])
+        
+        if not allowed_courses:
+            return items
+        
+        filtered = []
+        for item in items:
+            if not item.course:
+                if course_filter_lower in ["snack", "appetizer"]:
+                    filtered.append(item)
+                continue
+            
+            item_course_lower = item.course.lower()
+            
+            for allowed_course in allowed_courses:
+                if allowed_course in item_course_lower:
+                    filtered.append(item)
+                    break
+        
+        if time_of_day:
+            filtered = self._apply_time_based_filter(filtered, time_of_day)
+        
+        if not filtered:
+            logger.warning(
+                "Course filter resulted in zero items, returning unfiltered",
+                extra={
+                    "course_filter": course_filter,
+                    "original_count": len(items),
+                    "filtered_count": 0
+                }
+            )
+            return items
+        
+        return filtered
+    
+    def _apply_time_based_filter(
+        self,
+        items: List[MenuItem],
+        time_of_day: str
+    ) -> List[MenuItem]:
+        hour = datetime.now().hour
+        
+        if 5 <= hour < 11:
+            breakfast_keywords = ["breakfast", "brunch", "morning"]
+            return [
+                item for item in items
+                if not item.course or any(kw in item.course.lower() for kw in breakfast_keywords)
+                or item.course.lower() in ["appetizer", "beverage", "snack"]
+            ]
+        
+        elif 11 <= hour < 18:
+            lunch_keywords = ["lunch", "dinner", "main", "entree"]
+            return [
+                item for item in items
+                if not item.course or any(kw in item.course.lower() for kw in lunch_keywords)
+                or item.course.lower() in ["appetizer", "dessert", "beverage", "snack", "salad"]
+            ]
+        
+        else:
+            return items
     
     def _get_user_embedding(
         self,
@@ -259,3 +362,206 @@ class RetrievalService:
         )
         
         return excluded
+    
+    def retrieve_candidates_from_query(
+        self,
+        session: Session,
+        user: User,
+        parsed_query: ParsedQuery,
+        k: int = 50,
+        budget: Optional[float] = None,
+        exclude_recent_days: int = 2
+    ) -> List[MenuItem]:
+        if not parsed_query.embedding_text:
+            raise ValueError("parsed_query must have embedding_text for retrieval")
+        
+        logger.info(
+            "Retrieving candidates from query",
+            extra={
+                "user_id": str(user.id),
+                "query": parsed_query.raw_query,
+                "intent": parsed_query.intent.value,
+                "k": k
+            }
+        )
+        
+        recent_item_ids = self._get_recent_item_ids(session, user, days=exclude_recent_days)
+        
+        query_embedding = self._generate_query_embedding(parsed_query)
+        if not query_embedding:
+            raise ValueError("failed to generate query embedding")
+        
+        if self._ensure_faiss_loaded():
+            return self._retrieve_query_with_faiss(
+                session, user, query_embedding, parsed_query, k, budget, recent_item_ids
+            )
+        else:
+            return self._retrieve_query_with_sql(
+                session, user, parsed_query, k, budget, recent_item_ids
+            )
+    
+    def _generate_query_embedding(self, parsed_query: ParsedQuery) -> Optional[List[float]]:
+        embedding_result = self.embedding_service.generate_embedding_openai(
+            parsed_query.embedding_text
+        )
+        
+        if not embedding_result:
+            logger.warning(
+                "Failed to generate query embedding with OpenAI, using local",
+                extra={"query": parsed_query.raw_query}
+            )
+            embedding_result = self.embedding_service.generate_embedding_local(
+                parsed_query.embedding_text
+            )
+        
+        return embedding_result
+    
+    def _retrieve_query_with_faiss(
+        self,
+        session: Session,
+        user: User,
+        query_embedding: List[float],
+        parsed_query: ParsedQuery,
+        k: int,
+        budget: Optional[float],
+        recent_item_ids: Set[UUID]
+    ) -> List[MenuItem]:
+        k_inflated = k * 4
+        
+        try:
+            search_results = self.faiss_service.search(
+                query_embedding=query_embedding,
+                k=k_inflated
+            )
+        except Exception as e:
+            logger.error(
+                "FAISS query search failed, falling back to SQL",
+                extra={"error": str(e)},
+                exc_info=True
+            )
+            return self._retrieve_query_with_sql(
+                session, user, parsed_query, k, budget, recent_item_ids
+            )
+        
+        item_ids = [item_id for item_id, _ in search_results]
+        
+        query = select(MenuItem).where(MenuItem.id.in_(item_ids))
+        if parsed_query.cuisine_filter:
+            query = query.where(MenuItem.cuisine.contains(parsed_query.cuisine_filter))
+        
+        items = list(session.exec(query).all())
+        
+        items_dict = {item.id: item for item in items}
+        ordered_items = []
+        for item_id, score in search_results:
+            if item_id in items_dict:
+                ordered_items.append(items_dict[item_id])
+        
+        filtered_by_recency = [
+            item for item in ordered_items 
+            if item.id not in recent_item_ids
+        ]
+        
+        filtered_items = self._apply_safety_filters(
+            filtered_by_recency, user, budget
+        )
+        
+        adjusted_items = self._apply_taste_adjustments(
+            filtered_items, parsed_query.taste_adjustments
+        )
+        
+        logger.info(
+            "FAISS query retrieval completed",
+            extra={
+                "retrieved": len(ordered_items),
+                "after_filters": len(adjusted_items)
+            }
+        )
+        
+        return adjusted_items[:k]
+    
+    def _retrieve_query_with_sql(
+        self,
+        session: Session,
+        user: User,
+        parsed_query: ParsedQuery,
+        k: int,
+        budget: Optional[float],
+        recent_item_ids: Set[UUID]
+    ) -> List[MenuItem]:
+        query = select(MenuItem)
+        if parsed_query.cuisine_filter:
+            query = query.where(MenuItem.cuisine.contains(parsed_query.cuisine_filter))
+        
+        all_items = list(session.exec(query).all())
+        
+        non_recent_items = [
+            item for item in all_items
+            if item.id not in recent_item_ids
+        ]
+        
+        filtered_items = self._apply_safety_filters(
+            non_recent_items, user, budget
+        )
+        
+        if not user.taste_vector:
+            return filtered_items[:k]
+        
+        scored_items = []
+        for item in filtered_items:
+            if not item.features:
+                continue
+            
+            adjusted_features = self._apply_taste_adjustments_to_features(
+                item.features, parsed_query.taste_adjustments
+            )
+            
+            score = cosine_similarity(user.taste_vector, adjusted_features)
+            scored_items.append((item, score))
+        
+        scored_items.sort(key=lambda x: x[1], reverse=True)
+        
+        return [item for item, _ in scored_items[:k]]
+    
+    def _apply_taste_adjustments(
+        self,
+        items: List[MenuItem],
+        taste_adjustments: Dict[str, float]
+    ) -> List[MenuItem]:
+        if not taste_adjustments:
+            return items
+        
+        adjusted = []
+        for item in items:
+            if item.features:
+                adjusted_features = self._apply_taste_adjustments_to_features(
+                    item.features, taste_adjustments
+                )
+                item_copy = item.model_copy()
+                item_copy.features = adjusted_features
+                adjusted.append(item_copy)
+            else:
+                adjusted.append(item)
+        
+        return adjusted
+    
+    def _apply_taste_adjustments_to_features(
+        self,
+        features: Dict[str, float],
+        taste_adjustments: Dict[str, float]
+    ) -> Dict[str, float]:
+        if not taste_adjustments:
+            return features
+        
+        adjusted = features.copy()
+        
+        for axis, adjustment in taste_adjustments.items():
+            if axis.startswith("texture_"):
+                continue
+            
+            if axis in adjusted:
+                current_value = adjusted[axis]
+                adjusted_value = max(0.0, min(1.0, current_value + adjustment))
+                adjusted[axis] = adjusted_value
+        
+        return adjusted

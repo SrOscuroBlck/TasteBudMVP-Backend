@@ -41,9 +41,59 @@ def build_item_features(
     ingredients: List[str], 
     tags: List[str],
     item_name: Optional[str] = None,
+    item_description: Optional[str] = None,
+    cached_llm_profile: Optional[Dict[str, float]] = None
+) -> Dict[str, float]:
+    if cached_llm_profile:
+        return cached_llm_profile
+    
+    llm_profile = generate_llm_taste_profile_with_fallback(
+        item_name,
+        item_description,
+        ingredients
+    )
+    
+    if llm_profile:
+        return llm_profile
+    
+    return generate_keyword_based_features(ingredients, tags, item_name, item_description)
+
+
+def generate_llm_taste_profile_with_fallback(
+    item_name: Optional[str],
+    item_description: Optional[str],
+    ingredients: List[str]
+) -> Dict[str, float]:
+    try:
+        from .llm_features import generate_llm_taste_profile
+        taste, texture, richness = generate_llm_taste_profile(item_name, item_description, ingredients)
+        if taste and len(taste) > 0:
+            return taste
+    except Exception:
+        pass
+    
+    return {}
+
+
+def generate_keyword_based_features(
+    ingredients: List[str],
+    tags: List[str],
+    item_name: Optional[str] = None,
     item_description: Optional[str] = None
 ) -> Dict[str, float]:
+    axes = build_axes_from_ingredients(ingredients)
+    axes = apply_tag_modifiers(axes, tags)
+    
+    if axes:
+        axes = normalize_axes(axes)
+        return axes
+    
+    return generate_keyword_matching_profile(ingredients, tags, item_name, item_description)
+
+
+def build_axes_from_ingredients(ingredients: List[str]) -> Dict[str, float]:
     axes: Dict[str, float] = {}
+    
     for ing in ingredients:
         key = canonicalize_ingredient(ing)
         meta = CANON_INGREDIENTS.get(key)
@@ -51,8 +101,11 @@ def build_item_features(
             continue
         for axis, val in meta.get("axes", {}).items():
             axes[axis] = axes.get(axis, 0.0) + val
+    
+    return axes
 
-    # tags influence
+
+def apply_tag_modifiers(axes: Dict[str, float], tags: List[str]) -> Dict[str, float]:
     tag_axis_map = {
         "fried": {"fattiness": 0.3, "umami": 0.1},
         "grilled": {"umami": 0.1},
@@ -69,41 +122,23 @@ def build_item_features(
         if t in tag_axis_map:
             for axis, val in tag_axis_map[t].items():
                 axes[axis] = axes.get(axis, 0.0) + val
-
-    # normalize to [0,1]
-    if axes:
-        m = max(abs(v) for v in axes.values())
-        if m > 0:
-            axes = {k: clamp01((v / m + 1) / 2) for k, v in axes.items()}
-    
-    if not axes and (item_name or item_description or ingredients):
-        axes = generate_fallback_features(ingredients, tags, item_name, item_description)
     
     return axes
 
 
-def generate_fallback_features(
+def normalize_axes(axes: Dict[str, float]) -> Dict[str, float]:
+    m = max(abs(v) for v in axes.values())
+    if m > 0:
+        return {k: clamp01((v / m + 1) / 2) for k, v in axes.items()}
+    return axes
+
+
+def generate_keyword_matching_profile(
     ingredients: List[str],
     tags: List[str],
-    item_name: Optional[str] = None,
-    item_description: Optional[str] = None
+    item_name: Optional[str],
+    item_description: Optional[str]
 ) -> Dict[str, float]:
-    """Generate taste profile using LLM or advanced keyword matching.
-    
-    Returns only SIGNIFICANT taste axes (values > 0.6 or < 0.4),
-    not neutral 0.5 for everything.
-    """
-    
-    # Try LLM-based generation first
-    try:
-        from .llm_features import generate_llm_taste_profile
-        llm_profile = generate_llm_taste_profile(item_name, item_description, ingredients)
-        if llm_profile and len(llm_profile) > 0:
-            return llm_profile
-    except Exception:
-        pass  # Fall through to keyword matching
-    
-    # Enhanced keyword matching with weighted contribution
     profile_accumulator = {}
     
     keyword_to_features = {

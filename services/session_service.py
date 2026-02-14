@@ -3,6 +3,7 @@ from typing import Dict, Optional
 from datetime import datetime
 from uuid import UUID
 from sqlmodel import Session, select
+from sqlalchemy.orm.attributes import flag_modified
 
 from models import (
     User, Restaurant, RecommendationSession, Rating, Interaction,
@@ -100,7 +101,8 @@ class RecommendationSessionService:
         
         session.status = "completed"
         session.completed_at = datetime.utcnow()
-        session.selected_item_ids = [str(item_id) for item_id in selected_item_ids]
+        session.selected_items = [str(item_id) for item_id in selected_item_ids]
+        flag_modified(session, "selected_items")
         
         for item_id in selected_item_ids:
             order_history = UserOrderHistory(
@@ -162,11 +164,22 @@ class RecommendationSessionService:
         existing = set(session.items_shown)
         new_items = [str(item_id) for item_id in item_ids if str(item_id) not in existing]
         
-        session.items_shown = session.items_shown + new_items
-        session.iteration_count += 1
-        
-        db_session.add(session)
-        db_session.commit()
+        if new_items:
+            session.items_shown = session.items_shown + new_items
+            flag_modified(session, "items_shown")
+            session.iteration_count += 1
+            
+            db_session.add(session)
+            db_session.commit()
+            
+            logger.info(
+                "Items added to session shown list",
+                extra={
+                    "session_id": str(session_id),
+                    "new_items_count": len(new_items),
+                    "total_shown": len(session.items_shown)
+                }
+            )
     
     def add_excluded_item(
         self,
@@ -178,8 +191,91 @@ class RecommendationSessionService:
         
         if str(item_id) not in session.excluded_items:
             session.excluded_items = session.excluded_items + [str(item_id)]
+            flag_modified(session, "excluded_items")
             db_session.add(session)
             db_session.commit()
+            
+            logger.info(
+                "Item added to session exclusions",
+                extra={
+                    "session_id": str(session_id),
+                    "item_id": str(item_id),
+                    "total_excluded": len(session.excluded_items)
+                }
+            )
+    
+    def set_active_composition(
+        self,
+        db_session: Session,
+        session_id: UUID,
+        composition_id: str,
+        appetizer_id: UUID,
+        main_id: UUID,
+        dessert_id: UUID
+    ) -> None:
+        """Set the currently active composition and initialize validation state"""
+        session = self.get_session(db_session, session_id)
+        
+        session.active_composition_id = composition_id
+        
+        # Initialize validation state for this composition
+        if not session.composition_validation_state:
+            session.composition_validation_state = {}
+        
+        session.composition_validation_state[composition_id] = {
+            "appetizer": {
+                "item_id": str(appetizer_id),
+                "status": "pending"
+            },
+            "main": {
+                "item_id": str(main_id),
+                "status": "pending"
+            },
+            "dessert": {
+                "item_id": str(dessert_id),
+                "status": "pending"
+            }
+        }
+        flag_modified(session, "composition_validation_state")
+        
+        db_session.add(session)
+        # Note: Caller must commit
+        
+        logger.info(
+            "Active composition set",
+            extra={
+                "session_id": str(session_id),
+                "composition_id": composition_id
+            }
+        )
+    
+    def update_composition_validation_state(
+        self,
+        db_session: Session,
+        session_id: UUID,
+        composition_id: str,
+        validation_state: Dict
+    ) -> None:
+        """Update validation state after user provides feedback"""
+        session = self.get_session(db_session, session_id)
+        
+        if not session.composition_validation_state:
+            session.composition_validation_state = {}
+        
+        session.composition_validation_state[composition_id] = validation_state
+        flag_modified(session, "composition_validation_state")
+        
+        db_session.add(session)
+        # Note: Caller must commit
+        
+        logger.info(
+            "Composition validation state updated",
+            extra={
+                "session_id": str(session_id),
+                "composition_id": composition_id,
+                "validation_state": validation_state
+            }
+        )
     
     def _detect_time_of_day(self, hour: int) -> str:
         if 6 <= hour < 11:
