@@ -127,7 +127,7 @@ def submit_post_meal_feedback(
     db_session.add(feedback)
     db_session.commit()
     
-    from services.online_learning_service import OnlineLearningService
+    from services.learning.online_learning_service import OnlineLearningService
     
     learning_service = OnlineLearningService()
     learning_service.update_from_post_meal_feedback(
@@ -158,7 +158,7 @@ def get_feedback_form(
     token: str,
     session: Session = Depends(get_session)
 ):
-    from services.email_service import email_service
+    from services.communication.email_service import email_service
     
     session_id = email_service.verify_feedback_token(token)
     
@@ -214,7 +214,7 @@ def submit_feedback_by_token(
     if request.taste_match < 1 or request.taste_match > 5:
         raise HTTPException(status_code=400, detail="taste_match must be between 1 and 5")
     
-    from services.email_service import email_service
+    from services.communication.email_service import email_service
     
     session_id = email_service.verify_feedback_token(token)
     
@@ -252,7 +252,7 @@ def submit_feedback_by_token(
     
     user = session.get(User, rec_session.user_id)
     
-    from services.online_learning_service import OnlineLearningService
+    from services.learning.online_learning_service import OnlineLearningService
     
     learning_service = OnlineLearningService()
     learning_service.update_from_post_meal_feedback(

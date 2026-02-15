@@ -96,7 +96,7 @@ EXAMPLES OF CORRECT NAME EXTRACTION:
 
 Menu section: "CREPES SALADOS"
 Items listed: "Jamón y Queso $18.90", "Queso $13.90", "Champiñones, Alcachofa y Queso $21.90"
-✅ CORRECT OUTPUT:
+CORRECT OUTPUT:
 {"name": "Crepe de Jamón y Queso", "description": "..."}
 {"name": "Crepe de Queso", "description": "..."}
 {"name": "Crepe de Champiñones, Alcachofa y Queso", "description": "..."}
@@ -104,38 +104,38 @@ WHY: Without "Crepe de", users wouldn't know these are crepes.
 
 Menu section: "HUEVOS"
 Items listed: "Poché $12.90", "Revueltos $11.90"
-✅ CORRECT OUTPUT:
+CORRECT OUTPUT:
 {"name": "Huevos Poché", "description": "..."}
 {"name": "Huevos Revueltos", "description": "..."}
 WHY: "Poché" alone doesn't tell users it's eggs.
 
 Menu section: "WAFFLES"
 Items listed: "Mantequilla y Syrup $9.90", "Fresas y Crema $13.90"
-✅ CORRECT OUTPUT:
+CORRECT OUTPUT:
 {"name": "Waffle de Mantequilla y Syrup", "description": "..."}
 {"name": "Waffle de Fresas y Crema", "description": "..."}
 WHY: Without "Waffle de", these just sound like ingredient lists.
 
 Menu section: "BEBIDAS"
 Items listed: "Coca-Cola $3.50", "Jugo de Naranja Natural $5.90"
-✅ CORRECT OUTPUT:
+CORRECT OUTPUT:
 {"name": "Coca-Cola", "description": "..."}
 {"name": "Jugo de Naranja Natural", "description": "..."}
 WHY: "Coca-Cola" is already clear. "Jugo de Naranja Natural" already says it's juice.
 
 Menu section: "DESAYUNOS"
 Items listed: "Pancakes de Ahuyama $8.90"
-✅ CORRECT OUTPUT:
+CORRECT OUTPUT:
 {"name": "Pancakes de Ahuyama", "description": "..."}
 WHY: "Pancakes de Ahuyama" is already clear - no need to add "Desayuno de".
 
-❌ WRONG - Missing context:
+WRONG - Missing context:
 {"name": "Queso"} - What is this? Cheese? A cheese dish?
 {"name": "Poché"} - Poached what?
 {"name": "Jamón y Queso"} - Ham and cheese what? Sandwich? Crepe?
 {"name": "Mantequilla y Syrup"} - This is just ingredients, not a dish name
 
-❌ WRONG - Technical annotations:
+WRONG - Technical annotations:
 {"name": "Queso (header repeat)"}
 {"name": "CREPES - Jamón y Queso"}
 {"name": "Section: Waffles"}
@@ -181,14 +181,14 @@ OUTPUT FORMAT (strict JSON):
 DESCRIPTION FIELD REQUIREMENTS:
 **ALL DESCRIPTIONS MUST BE IN ENGLISH** - even if the menu and dish names are in another language.
 
-✅ GOOD descriptions (in English):
+GOOD descriptions (in English):
 - "Crepe filled with ham and melted cheese" (describes what it is)
 - "Poached eggs served with toast" (tells what you get)
 - "Grilled chicken breast with vegetables" (explains the dish)
 - "Belgian waffle topped with butter and maple syrup" (describes components)
 - "Sandwich with hearts of palm on toasted bread" (describes unfamiliar ingredients)
 
-❌ BAD descriptions (DO NOT DO THIS):
+BAD descriptions (DO NOT DO THIS):
 - "Palmitos $33.300" (this is just raw menu text!)
 - "Jamón y Queso $18.90" (just repeating the menu line!)
 - "Crepe con jamón y queso" (this is just a translation of the name, not a description!)

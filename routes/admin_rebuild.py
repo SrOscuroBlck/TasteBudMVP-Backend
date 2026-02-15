@@ -5,8 +5,8 @@ from datetime import datetime
 
 from config.database import get_session
 from models.restaurant import MenuItem
-from services.faiss_service import FAISSService
-from services.similarity_matrix_service import SimilarityMatrixService
+from services.features.faiss_service import FAISSService
+from services.infrastructure.similarity_matrix_service import SimilarityMatrixService
 from utils.logger import setup_logger
 
 router = APIRouter(prefix="/admin/rebuild", tags=["Admin - Index Maintenance"])

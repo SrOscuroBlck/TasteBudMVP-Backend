@@ -8,9 +8,9 @@ from datetime import datetime
 from config.database import get_session
 from models import User
 from models.session import MealIntent, FeedbackType
-from services.session_service import RecommendationSessionService
-from services.recommendation_service import RecommendationService
-from services.unified_feedback_service import UnifiedFeedbackService
+from services.core.session_service import RecommendationSessionService
+from services.core.recommendation_service import RecommendationService
+from services.learning.unified_feedback_service import UnifiedFeedbackService
 from routes.api import get_current_user
 from utils.logger import setup_logger
 
