@@ -6,7 +6,7 @@ from datetime import datetime
 from config.database import get_session, engine
 from models.restaurant import MenuItem, Restaurant
 from models.user import User
-from services.faiss_service import FAISSService
+from services.features.faiss_service import FAISSService
 from utils.circuit_breaker import openai_circuit_breaker, embedding_circuit_breaker
 from utils.logger import setup_logger
 

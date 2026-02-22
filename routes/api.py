@@ -6,12 +6,12 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from config.database import get_session
 from models import User, Restaurant, MenuItem
-from services.onboarding_service import OnboardingService
-from services.menu_service import MenuService
-from services.recommendation_service import RecommendationService
-from services.unified_feedback_service import UnifiedFeedbackService
-from services.auth_service import auth_service, AuthenticationError
-from services.gpt_helper import explain_similarity
+from services.user.onboarding_service import OnboardingService
+from services.context.menu_service import MenuService
+from services.core.recommendation_service import RecommendationService
+from services.learning.unified_feedback_service import UnifiedFeedbackService
+from services.user.auth_service import auth_service, AuthenticationError
+from services.features.gpt_helper import explain_similarity
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)

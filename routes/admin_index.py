@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from config.database import get_session
-from services.index_maintenance_service import IndexMaintenanceService, IndexMaintenanceResult
+from services.infrastructure.index_maintenance_service import IndexMaintenanceService, IndexMaintenanceResult
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)

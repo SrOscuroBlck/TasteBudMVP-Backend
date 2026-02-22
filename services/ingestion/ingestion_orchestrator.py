@@ -5,11 +5,11 @@ from datetime import datetime
 from sqlmodel import Session
 from models.restaurant import Restaurant, MenuItem
 from models.ingestion import MenuUpload, IngestionStatus, IngestionSource, MenuParsingResult, ParsedMenuItem
-from services.features import build_item_features, canonicalize_ingredient
-from services.llm_features import generate_llm_taste_profile
-from services.embedding_service import EmbeddingService
-from services.faiss_service import FAISSService
-from services.similarity_matrix_service import SimilarityMatrixService
+from services.features.features import build_item_features, canonicalize_ingredient
+from services.features.llm_features import generate_llm_taste_profile
+from services.features.embedding_service import EmbeddingService
+from services.features.faiss_service import FAISSService
+from services.infrastructure.similarity_matrix_service import SimilarityMatrixService
 from .pdf_processor import PDFProcessor, PDFExtractionError
 from .menu_parser import MenuParser, MenuParsingError
 
