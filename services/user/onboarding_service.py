@@ -17,58 +17,135 @@ FALLBACK_QUESTIONS = [
     {
         "prompt": "Would you rather have a cheesy Margherita pizza or a spicy beef taco?",
         "options": [
-            {"id": "A", "label": "Margherita Pizza", "tags": ["cheesy", "baked", "umami"], "ingredient_keys": ["dough", "tomato", "mozzarella"]},
-            {"id": "B", "label": "Spicy Beef Taco", "tags": ["spicy", "fried", "umami"], "ingredient_keys": ["beef", "chili"]},
+            {
+                "id": "A",
+                "label": "Margherita Pizza",
+                "tags": ["cheesy", "baked", "umami"],
+                "ingredient_keys": ["dough", "tomato", "mozzarella"],
+                "axis_impacts": {"umami": 0.3, "fatty": 0.2, "salty": 0.1},
+            },
+            {
+                "id": "B",
+                "label": "Spicy Beef Taco",
+                "tags": ["spicy", "fried", "umami"],
+                "ingredient_keys": ["beef", "chili"],
+                "axis_impacts": {"spicy": 0.4, "umami": 0.2, "salty": 0.1},
+            },
         ],
-        "axis_hints": {"umami": 0.2, "fattiness": 0.1, "spicy": 0.3},
     },
     {
         "prompt": "Would you prefer sweet honey-glazed salmon or tangy lemon herb chicken?",
         "options": [
-            {"id": "A", "label": "Honey-Glazed Salmon", "tags": ["sweet", "grilled", "tender"], "ingredient_keys": ["salmon", "honey", "ginger"]},
-            {"id": "B", "label": "Lemon Herb Chicken", "tags": ["tangy", "citrus", "savory"], "ingredient_keys": ["chicken", "lemon", "herbs"]},
+            {
+                "id": "A",
+                "label": "Honey-Glazed Salmon",
+                "tags": ["sweet", "grilled", "tender"],
+                "ingredient_keys": ["salmon", "honey", "ginger"],
+                "axis_impacts": {"sweet": 0.4, "umami": 0.2, "fatty": 0.1},
+            },
+            {
+                "id": "B",
+                "label": "Lemon Herb Chicken",
+                "tags": ["tangy", "citrus", "savory"],
+                "ingredient_keys": ["chicken", "lemon", "herbs"],
+                "axis_impacts": {"sour": 0.4, "bitter": 0.1, "umami": 0.1},
+            },
         ],
-        "axis_hints": {"sweet": 0.4, "acidity": 0.3, "sour": 0.2},
     },
     {
         "prompt": "Would you choose crispy fried chicken or a fresh garden salad?",
         "options": [
-            {"id": "A", "label": "Crispy Fried Chicken", "tags": ["crispy", "fried", "savory"], "ingredient_keys": ["chicken", "breading", "oil"]},
-            {"id": "B", "label": "Fresh Garden Salad", "tags": ["fresh", "crunchy", "light"], "ingredient_keys": ["lettuce", "tomato", "cucumber"]},
+            {
+                "id": "A",
+                "label": "Crispy Fried Chicken",
+                "tags": ["crispy", "fried", "savory"],
+                "ingredient_keys": ["chicken", "breading", "oil"],
+                "axis_impacts": {"fatty": 0.4, "salty": 0.2, "umami": 0.1},
+            },
+            {
+                "id": "B",
+                "label": "Fresh Garden Salad",
+                "tags": ["fresh", "crunchy", "light"],
+                "ingredient_keys": ["lettuce", "tomato", "cucumber"],
+                "axis_impacts": {"bitter": 0.2, "sour": 0.2, "fatty": -0.2},
+            },
         ],
-        "axis_hints": {"crunch": 0.3, "fattiness": 0.4, "acidity": 0.2},
     },
     {
         "prompt": "Would you rather have salty french fries or sweet potato fries?",
         "options": [
-            {"id": "A", "label": "Salty French Fries", "tags": ["salty", "crispy", "savory"], "ingredient_keys": ["potato", "salt", "oil"]},
-            {"id": "B", "label": "Sweet Potato Fries", "tags": ["sweet", "crispy", "earthy"], "ingredient_keys": ["sweet_potato", "oil", "cinnamon"]},
+            {
+                "id": "A",
+                "label": "Salty French Fries",
+                "tags": ["salty", "crispy", "savory"],
+                "ingredient_keys": ["potato", "salt", "oil"],
+                "axis_impacts": {"salty": 0.4, "fatty": 0.2},
+            },
+            {
+                "id": "B",
+                "label": "Sweet Potato Fries",
+                "tags": ["sweet", "crispy", "earthy"],
+                "ingredient_keys": ["sweet_potato", "oil", "cinnamon"],
+                "axis_impacts": {"sweet": 0.4, "fatty": 0.1},
+            },
         ],
-        "axis_hints": {"salty": 0.4, "sweet": 0.3, "crunch": 0.2},
     },
     {
         "prompt": "Would you prefer rich chocolate lava cake or tangy key lime pie?",
         "options": [
-            {"id": "A", "label": "Chocolate Lava Cake", "tags": ["sweet", "rich", "warm"], "ingredient_keys": ["chocolate", "butter", "sugar"]},
-            {"id": "B", "label": "Key Lime Pie", "tags": ["tangy", "citrus", "tart"], "ingredient_keys": ["lime", "condensed_milk", "graham_cracker"]},
+            {
+                "id": "A",
+                "label": "Chocolate Lava Cake",
+                "tags": ["sweet", "rich", "warm"],
+                "ingredient_keys": ["chocolate", "butter", "sugar"],
+                "axis_impacts": {"sweet": 0.3, "bitter": 0.2, "fatty": 0.2},
+            },
+            {
+                "id": "B",
+                "label": "Key Lime Pie",
+                "tags": ["tangy", "citrus", "tart"],
+                "ingredient_keys": ["lime", "condensed_milk", "graham_cracker"],
+                "axis_impacts": {"sour": 0.4, "sweet": 0.2},
+            },
         ],
-        "axis_hints": {"sweet": 0.3, "sour": 0.4, "fattiness": 0.2},
     },
     {
         "prompt": "Would you choose spicy hot wings or mild BBQ ribs?",
         "options": [
-            {"id": "A", "label": "Spicy Hot Wings", "tags": ["spicy", "tangy", "crispy"], "ingredient_keys": ["chicken", "hot_sauce", "butter"]},
-            {"id": "B", "label": "Mild BBQ Ribs", "tags": ["sweet", "smoky", "tender"], "ingredient_keys": ["pork", "bbq_sauce", "brown_sugar"]},
+            {
+                "id": "A",
+                "label": "Spicy Hot Wings",
+                "tags": ["spicy", "tangy", "crispy"],
+                "ingredient_keys": ["chicken", "hot_sauce", "butter"],
+                "axis_impacts": {"spicy": 0.5, "salty": 0.2, "fatty": 0.1},
+            },
+            {
+                "id": "B",
+                "label": "Mild BBQ Ribs",
+                "tags": ["sweet", "smoky", "tender"],
+                "ingredient_keys": ["pork", "bbq_sauce", "brown_sugar"],
+                "axis_impacts": {"sweet": 0.3, "umami": 0.3, "fatty": 0.1},
+            },
         ],
-        "axis_hints": {"spicy": 0.5, "sweet": 0.3, "umami": 0.2},
     },
     {
         "prompt": "Would you rather have creamy mac and cheese or light steamed vegetables?",
         "options": [
-            {"id": "A", "label": "Creamy Mac and Cheese", "tags": ["creamy", "cheesy", "rich"], "ingredient_keys": ["pasta", "cheese", "cream"]},
-            {"id": "B", "label": "Steamed Vegetables", "tags": ["light", "fresh", "healthy"], "ingredient_keys": ["broccoli", "carrot", "zucchini"]},
+            {
+                "id": "A",
+                "label": "Creamy Mac and Cheese",
+                "tags": ["creamy", "cheesy", "rich"],
+                "ingredient_keys": ["pasta", "cheese", "cream"],
+                "axis_impacts": {"fatty": 0.4, "salty": 0.2, "umami": 0.2},
+            },
+            {
+                "id": "B",
+                "label": "Steamed Vegetables",
+                "tags": ["light", "fresh", "healthy"],
+                "ingredient_keys": ["broccoli", "carrot", "zucchini"],
+                "axis_impacts": {"bitter": 0.2, "sour": 0.1, "fatty": -0.3},
+            },
         ],
-        "axis_hints": {"fattiness": 0.5, "umami": 0.2, "acidity": 0.1},
     },
 ]
 
@@ -149,43 +226,46 @@ class OnboardingService:
         if not state:
             return {"complete": True}
         
-        # Get question data from OnboardingState
         last_question_data = state.current_question_data or {}
-        
-        # Extract axis hints
-        axis_hints = last_question_data.get("axis_hints", {})
-        
-        # Get the chosen option details
         options = last_question_data.get("options", [])
         chosen_option = next((opt for opt in options if opt.get("id") == chosen_option_id), None)
         
-        # coerce axis_hints to numeric deltas in [0,1]
-        numeric_axis_hints = {}
-        for axis, delta in axis_hints.items():
-            try:
-                v = float(delta)
-            except Exception:
-                v = 0.2
-            numeric_axis_hints[axis] = max(0.0, min(1.0, abs(v)))
-
-        sign = 1.0 if chosen_option_id == "B" else -1.0
-        for axis, v in numeric_axis_hints.items():
-            old = user.taste_vector.get(axis, 0.5)
-            user.taste_vector[axis] = clamp01(old + settings.ONBOARDING_K * sign * v)
-            user.taste_uncertainty[axis] = max(0.0, user.taste_uncertainty.get(axis, 0.5) - settings.ONBOARDING_SIGMA_STEP)
+        if chosen_option:
+            axis_impacts = chosen_option.get("axis_impacts", {})
+            touched_axes = set()
+            for axis, delta in axis_impacts.items():
+                if axis not in TASTE_AXES:
+                    continue
+                try:
+                    v = float(delta)
+                except Exception:
+                    continue
+                old = user.taste_vector.get(axis, 0.5)
+                user.taste_vector[axis] = clamp01(old + settings.ONBOARDING_K * v)
+                touched_axes.add(axis)
+            
+            for axis in touched_axes:
+                user.taste_uncertainty[axis] = max(
+                    0.0,
+                    user.taste_uncertainty.get(axis, 0.5) - settings.ONBOARDING_SIGMA_STEP,
+                )
         
-        # Record answer with chosen option details
-        new_answer = {
+        choice_record = {
             "question_id": question_id,
+            "prompt": last_question_data.get("prompt", ""),
             "chosen": chosen_option_id,
+            "chosen_label": chosen_option.get("label", "") if chosen_option else "",
+            "chosen_tags": chosen_option.get("tags", []) if chosen_option else [],
+            "chosen_ingredients": chosen_option.get("ingredient_keys", []) if chosen_option else [],
+            "axis_impacts_applied": chosen_option.get("axis_impacts", {}) if chosen_option else {},
             "timestamp": datetime.utcnow().isoformat(),
-            "ingredients": chosen_option.get("ingredient_keys", []) if chosen_option else [],
-            "tags": chosen_option.get("tags", []) if chosen_option else [],
-            "label": chosen_option.get("label", "") if chosen_option else ""
         }
-        state.answered_pairs = state.answered_pairs + [new_answer]
+        state.answered_pairs = state.answered_pairs + [choice_record]
         
-        # recompute confidence
+        if not user.onboarding_choices:
+            user.onboarding_choices = []
+        user.onboarding_choices = user.onboarding_choices + [choice_record]
+        
         avg_sigma = sum(user.taste_uncertainty.values()) / max(1, len(user.taste_uncertainty))
         state.confidence = 1.0 - avg_sigma
         user.last_updated = datetime.utcnow()
@@ -193,16 +273,13 @@ class OnboardingService:
         session.add(state)
         session.commit()
         session.refresh(state)
-        # early stop
+        
         if state.confidence >= settings.ONBOARDING_EARLY_STOP_CONFIDENCE or len(state.answered_pairs) >= settings.ONBOARDING_MAX_QUESTIONS:
             state.active = False
             session.add(state)
             session.commit()
             
-            # Calculate cuisine affinity from chosen ingredients
             self._calculate_cuisine_affinity_from_choices(user, state, session)
-            
-            # Create Bayesian profile for new user
             self._ensure_bayesian_profile(user, session)
             
             return {"complete": True}
@@ -210,23 +287,16 @@ class OnboardingService:
 
     def _next_question(self, session: Session, user: User, state: OnboardingState) -> Dict[str, Any]:
         target_axes = self._top_uncertain_axes(user)
-        context = {
-            "user_allergies": user.allergies,
-            "target_axes": target_axes,
-            "schema": "{question_id,prompt,options:[{id,label,tags,ingredient_keys}],axis_hints}"
-        }
-        q = generate_onboarding_question(context)
+        q = generate_onboarding_question(target_axes, user.allergies or [])
         if not q:
-            # Use cycling fallback based on number of answered questions
             fallback_index = len(state.answered_pairs) % len(FALLBACK_QUESTIONS)
             qf = FALLBACK_QUESTIONS[fallback_index]
             q = {"question_id": str(uuid4()), **qf}
         
-        # Store full question data in OnboardingState for retrieval when answer comes
         state.current_question_data = {
             "question_id": q["question_id"],
-            "axis_hints": q.get("axis_hints", {}),
-            "options": q.get("options", [])
+            "prompt": q.get("prompt", ""),
+            "options": q.get("options", []),
         }
         session.add(state)
         session.commit()

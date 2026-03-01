@@ -141,7 +141,8 @@ def reset_user(user_id: UUID = None, email: str = None):
         # Reset user profile
         print(f"️  Resetting user profile...")
         
-        default_axes = ["sweet", "sour", "salty", "bitter", "umami", "spicy", "fattiness", "acidity", "crunch", "temp_hot"]
+        from models.user import TASTE_AXES
+        default_axes = TASTE_AXES
         
         user.taste_vector = {axis: 0.5 for axis in default_axes}
         user.taste_uncertainty = {axis: 0.5 for axis in default_axes}

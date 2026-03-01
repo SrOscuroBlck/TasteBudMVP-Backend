@@ -1,6 +1,11 @@
 from __future__ import annotations
-from typing import Dict, Any, cast
+import json
+import re
+from typing import Dict, Any, List, cast
+from uuid import uuid4
 from config.settings import settings
+
+TASTE_AXES_LIST = ["sweet", "sour", "salty", "bitter", "umami", "fatty", "spicy"]
 
 
 def _client():
@@ -13,28 +18,73 @@ def _client():
         return None
 
 
-def generate_onboarding_question(context: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_markdown_fences(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def generate_onboarding_question(target_axes: List[str], allergies: List[str]) -> Dict[str, Any]:
     client = _client()
     if not client:
         return {}
-    sys = (
-        "Return a single JSON object only matching the schema with fields: question_id (uuid), prompt, "
-        "options (two with id A and B), and axis_hints. Culturally neutral foods. Avoid allergens in user filters."
+
+    allergen_note = f"The user is allergic to: {', '.join(allergies)}. Do NOT include these ingredients." if allergies else ""
+    axes_csv = ", ".join(target_axes) if target_axes else ", ".join(TASTE_AXES_LIST[:3])
+
+    system_prompt = (
+        "You generate food preference questions for a taste profiling system.\n"
+        "The ONLY valid taste axes are: sweet, sour, salty, bitter, umami, fatty, spicy.\n"
+        "Return ONLY a JSON object (no markdown, no explanation) matching this exact schema:\n"
+        "{\n"
+        '  "question_id": "<uuid>",\n'
+        '  "prompt": "Would you rather have <food A> or <food B>?",\n'
+        '  "options": [\n'
+        '    {"id": "A", "label": "<food>", "tags": [...], "ingredient_keys": [...], "axis_impacts": {"<axis>": <float -0.5..0.5>, ...}},\n'
+        '    {"id": "B", "label": "<food>", "tags": [...], "ingredient_keys": [...], "axis_impacts": {"<axis>": <float -0.5..0.5>, ...}}\n'
+        "  ]\n"
+        "}\n\n"
+        "Rules:\n"
+        "- axis_impacts keys MUST be from: sweet, sour, salty, bitter, umami, fatty, spicy. No other keys.\n"
+        "- Each option gets its OWN axis_impacts reflecting what choosing it reveals about the user.\n"
+        "- The two foods should contrast on the target axes so the choice is informative.\n"
+        "- Use real, recognizable dishes. Keep labels short (2-4 words).\n"
+        "- axis_impacts values range from -0.5 to 0.5. Use 2-4 axes per option.\n"
+        f"{allergen_note}"
     )
-    msg = [{"role": "system", "content": sys}, {"role": "user", "content": str(context)}]
+
+    user_prompt = f"Generate a question targeting these taste axes: {axes_csv}"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
     try:
-        # The OpenAI client expects a specific message param type; cast to Any to satisfy type checkers
-        r = client.chat.completions.create(model=settings.OPENAI_MODEL, messages=cast(Any, msg), temperature=0.5, max_tokens=250)
-        content = r.choices[0].message.content or ""
-        txt = content.strip()
-        import json
-        data = json.loads(txt)
-        # minimal validation
-        if all(k in data for k in ("question_id", "prompt", "options")):
-            return data
+        response = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=cast(Any, messages),
+            temperature=0.7,
+            max_tokens=350,
+        )
+        raw = response.choices[0].message.content or ""
+        cleaned = _strip_markdown_fences(raw)
+        data = json.loads(cleaned)
+
+        if not all(k in data for k in ("question_id", "prompt", "options")):
+            return {}
+        if len(data["options"]) != 2:
+            return {}
+
+        for option in data["options"]:
+            impacts = option.get("axis_impacts", {})
+            filtered = {k: v for k, v in impacts.items() if k in TASTE_AXES_LIST}
+            option["axis_impacts"] = filtered
+
+        return data
     except Exception:
-        pass
-    return {}
+        return {}
 
 
 def generate_rationale(context: Dict[str, Any]) -> str:

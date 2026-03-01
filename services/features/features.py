@@ -4,14 +4,13 @@ import math
 
 
 CANON_INGREDIENTS: Dict[str, Dict] = {
-    # ingredient: meta
-    "tomato": {"allergen": None, "axes": {"acidity": 0.6, "umami": 0.2}},
-    "mozzarella": {"allergen": "lactose", "axes": {"fattiness": 0.7, "umami": 0.3}},
-    "basil": {"allergen": None, "axes": {"acidity": 0.1}},
+    "tomato": {"allergen": None, "axes": {"sour": 0.6, "umami": 0.2}},
+    "mozzarella": {"allergen": "lactose", "axes": {"fatty": 0.7, "umami": 0.3}},
+    "basil": {"allergen": None, "axes": {"sour": 0.1}},
     "dough": {"allergen": "gluten", "axes": {"sweet": 0.1}},
-    "beef": {"allergen": None, "axes": {"umami": 0.7, "fattiness": 0.5}},
-    "chili": {"allergen": None, "axes": {"spicy": 0.9, "acidity": 0.2}},
-    "peanut": {"allergen": "peanut", "axes": {"fattiness": 0.6}},
+    "beef": {"allergen": None, "axes": {"umami": 0.7, "fatty": 0.5}},
+    "chili": {"allergen": None, "axes": {"spicy": 0.9, "sour": 0.2}},
+    "peanut": {"allergen": "peanut", "axes": {"fatty": 0.6}},
     "shrimp": {"allergen": "shellfish", "axes": {"umami": 0.6}},
     "tofu": {"allergen": None, "axes": {"umami": 0.3}},
 }
@@ -107,15 +106,15 @@ def build_axes_from_ingredients(ingredients: List[str]) -> Dict[str, float]:
 
 def apply_tag_modifiers(axes: Dict[str, float], tags: List[str]) -> Dict[str, float]:
     tag_axis_map = {
-        "fried": {"fattiness": 0.3, "umami": 0.1},
+        "fried": {"fatty": 0.3, "umami": 0.1},
         "grilled": {"umami": 0.1},
         "spicy": {"spicy": 0.6},
-        "cheesy": {"fattiness": 0.4, "umami": 0.2},
+        "cheesy": {"fatty": 0.4, "umami": 0.2},
         "sweet": {"sweet": 0.6},
         "sour": {"sour": 0.6},
-        "crunchy": {"crunch": 0.5},
-        "hot": {"temp_hot": 0.7},
-        "cold": {"temp_hot": -0.5},
+        "crunchy": {"fatty": 0.2},
+        "hot": {"spicy": 0.4},
+        "cold": {},
     }
 
     for t in tags:
@@ -143,69 +142,69 @@ def generate_keyword_matching_profile(
     
     keyword_to_features = {
         # Proteins
-        "huevo": {"umami": 0.75, "fattiness": 0.7, "temp_hot": 1.0},
-        "egg": {"umami": 0.75, "fattiness": 0.7, "temp_hot": 1.0},
-        "pollo": {"umami": 0.8, "salty": 0.6, "temp_hot": 1.0},
-        "chicken": {"umami": 0.8, "salty": 0.6, "temp_hot": 1.0},
-        "carne": {"umami": 0.85, "salty": 0.7, "fattiness": 0.8},
-        "beef": {"umami": 0.85, "salty": 0.7, "fattiness": 0.8},
-        "cerdo": {"umami": 0.8, "fattiness": 0.8, "salty": 0.7},
-        "pork": {"umami": 0.8, "fattiness": 0.8, "salty": 0.7},
-        "jamón": {"salty": 0.8, "umami": 0.7, "fattiness": 0.6},
-        "ham": {"salty": 0.8, "umami": 0.7, "fattiness": 0.6},
-        "bacon": {"fattiness": 0.9, "salty": 0.9, "umami": 0.8},
-        "tocineta": {"fattiness": 0.9, "salty": 0.9, "umami": 0.8},
-        "salmon": {"fattiness": 0.7, "umami": 0.7, "temp_hot": 0.8},
-        "camarones": {"umami": 0.8, "salty": 0.7, "temp_hot": 1.0},
-        "shrimp": {"umami": 0.8, "salty": 0.7, "temp_hot": 1.0},
-        "calamar": {"umami": 0.8, "salty": 0.6, "temp_hot": 1.0},
-        "squid": {"umami": 0.8, "salty": 0.6, "temp_hot": 1.0},
+        "huevo": {"umami": 0.75, "fatty": 0.7},
+        "egg": {"umami": 0.75, "fatty": 0.7},
+        "pollo": {"umami": 0.8, "salty": 0.6},
+        "chicken": {"umami": 0.8, "salty": 0.6},
+        "carne": {"umami": 0.85, "salty": 0.7, "fatty": 0.8},
+        "beef": {"umami": 0.85, "salty": 0.7, "fatty": 0.8},
+        "cerdo": {"umami": 0.8, "fatty": 0.8, "salty": 0.7},
+        "pork": {"umami": 0.8, "fatty": 0.8, "salty": 0.7},
+        "jamón": {"salty": 0.8, "umami": 0.7, "fatty": 0.6},
+        "ham": {"salty": 0.8, "umami": 0.7, "fatty": 0.6},
+        "bacon": {"fatty": 0.9, "salty": 0.9, "umami": 0.8},
+        "tocineta": {"fatty": 0.9, "salty": 0.9, "umami": 0.8},
+        "salmon": {"fatty": 0.7, "umami": 0.7},
+        "camarones": {"umami": 0.8, "salty": 0.7},
+        "shrimp": {"umami": 0.8, "salty": 0.7},
+        "calamar": {"umami": 0.8, "salty": 0.6},
+        "squid": {"umami": 0.8, "salty": 0.6},
         
         # Dairy
-        "queso": {"fattiness": 0.8, "umami": 0.7, "salty": 0.7},
-        "cheese": {"fattiness": 0.8, "umami": 0.7, "salty": 0.7},
-        "crema": {"fattiness": 0.8, "sweet": 0.6},
-        "cream": {"fattiness": 0.8, "sweet": 0.6},
-        "mantequilla": {"fattiness": 0.95},
-        "butter": {"fattiness": 0.95},
+        "queso": {"fatty": 0.8, "umami": 0.7, "salty": 0.7},
+        "cheese": {"fatty": 0.8, "umami": 0.7, "salty": 0.7},
+        "crema": {"fatty": 0.8, "sweet": 0.6},
+        "cream": {"fatty": 0.8, "sweet": 0.6},
+        "mantequilla": {"fatty": 0.95},
+        "butter": {"fatty": 0.95},
         
         # Sweet Items
-        "waffle": {"sweet": 0.7, "fattiness": 0.6, "temp_hot": 0.9},
-        "crepe": {"sweet": 0.65, "fattiness": 0.5, "temp_hot": 0.8},
-        "pancake": {"sweet": 0.7, "fattiness": 0.6, "temp_hot": 0.9},
-        "chocolate": {"sweet": 0.9, "bitter": 0.4, "fattiness": 0.7},
+        "waffle": {"sweet": 0.7, "fatty": 0.6},
+        "crepe": {"sweet": 0.65, "fatty": 0.5},
+        "pancake": {"sweet": 0.7, "fatty": 0.6},
+        "chocolate": {"sweet": 0.9, "bitter": 0.4, "fatty": 0.7},
         "miel": {"sweet": 0.95},
         "honey": {"sweet": 0.95},
         "syrup": {"sweet": 0.95},
         "azúcar": {"sweet": 1.0},
         "sugar": {"sweet": 1.0},
-        "helado": {"sweet": 0.8, "fattiness": 0.7},
-        "ice cream": {"sweet": 0.8, "fattiness": 0.7},
+        "helado": {"sweet": 0.8, "fatty": 0.7},
+        "ice cream": {"sweet": 0.8, "fatty": 0.7},
         
         # Fruits & Veg
-        "fruta": {"sweet": 0.7, "acidity": 0.5},
-        "fruit": {"sweet": 0.7, "acidity": 0.5},
-        "limón": {"sour": 0.9, "acidity": 0.9},
-        "lemon": {"sour": 0.9, "acidity": 0.9},
-        "naranja": {"sweet": 0.7, "sour": 0.5, "acidity": 0.6},
-        "orange": {"sweet": 0.7, "sour": 0.5, "acidity": 0.6},
-        "aguacate": {"fattiness": 0.8, "umami": 0.4},
-        "avocado": {"fattiness": 0.8, "umami": 0.4},
-        "tomate": {"umami": 0.5, "acidity": 0.7, "sour": 0.4},
-        "tomato": {"umami": 0.5, "acidity": 0.7, "sour": 0.4},
+        "fruta": {"sweet": 0.7, "sour": 0.5},
+        "fruit": {"sweet": 0.7, "sour": 0.5},
+        "limón": {"sour": 0.9},
+        "lemon": {"sour": 0.9},
+        "naranja": {"sweet": 0.7, "sour": 0.6},
+        "orange": {"sweet": 0.7, "sour": 0.6},
+        "aguacate": {"fatty": 0.8, "umami": 0.4},
+        "avocado": {"fatty": 0.8, "umami": 0.4},
+        "tomate": {"umami": 0.5, "sour": 0.6},
+        "tomato": {"umami": 0.5, "sour": 0.6},
         
         # Spices & Flavor
-        "curry": {"spicy": 0.85, "umami": 0.7, "temp_hot": 1.0},
+        "curry": {"spicy": 0.85, "umami": 0.7},
         "picante": {"spicy": 0.9},
         "spicy": {"spicy": 0.9},
         "ajo": {"umami": 0.6, "salty": 0.4},
         "garlic": {"umami": 0.6, "salty": 0.4},
         
         # Preparations
-        "frito": {"fattiness": 0.8, "crunch": 0.7, "temp_hot": 1.0},
-        "fried": {"fattiness": 0.8, "crunch": 0.7, "temp_hot": 1.0},
-        "crispy": {"crunch": 0.9, "fattiness": 0.6},
-        "crujiente": {"crunch": 0.9, "fattiness": 0.6},
+        "frito": {"fatty": 0.8, "umami": 0.6},
+        "fried": {"fatty": 0.8, "umami": 0.6},
+        "crispy": {"fatty": 0.6, "umami": 0.5},
+        "crujiente": {"fatty": 0.6, "umami": 0.5},
     }
     
     # Combine all text
@@ -235,22 +234,16 @@ def generate_keyword_matching_profile(
         if avg >= 0.6:  # Strong positive characteristic
             profile[axis] = min(1.0, avg)
     
-    # If no matches, provide minimal sensible defaults based on course
     if not profile:
-        # Analyze item name for basic classification
         name_lower = (item_name or "").lower()
         
         if any(word in name_lower for word in ["limonada", "jugo", "batido", "bebida"]):
-            # Beverages - simple sweet profile
             profile = {"sweet": 0.6}
         elif any(word in name_lower for word in ["ensalada", "salad"]):
-            # Salads - fresh and light
-            profile = {"acidity": 0.6, "crunch": 0.7}
+            profile = {"sour": 0.6, "bitter": 0.4}
         elif any(word in name_lower for word in ["sopa", "soup"]):
-            # Soups - hot and savory
-            profile = {"umami": 0.6, "temp_hot": 1.0}
+            profile = {"umami": 0.6, "salty": 0.5}
         else:
-            # Default savory profile for unknown items
             profile = {"umami": 0.6, "salty": 0.6}
     
     return profile

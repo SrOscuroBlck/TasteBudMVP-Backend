@@ -300,12 +300,9 @@ class RetrievalService:
         user: User,
         embedding_field: str
     ) -> Optional[List[float]]:
-        taste_axes = [
-            "sweet", "sour", "salty", "bitter", "umami",
-            "spicy", "fattiness", "acidity", "crunch", "temp_hot"
-        ]
+        from models.user import TASTE_AXES
         
-        embedding = [user.taste_vector.get(axis, 0.5) for axis in taste_axes]
+        embedding = [user.taste_vector.get(axis, 0.5) for axis in TASTE_AXES]
         
         if embedding_field == "reduced_embedding" and len(embedding) < 64:
             embedding = embedding + [0.0] * (64 - len(embedding))

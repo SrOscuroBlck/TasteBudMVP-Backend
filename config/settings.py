@@ -27,8 +27,8 @@ class Settings:
     # Onboarding
     ONBOARDING_MAX_QUESTIONS: int = int(os.getenv("ONBOARDING_MAX_QUESTIONS", "7"))
     ONBOARDING_EARLY_STOP_CONFIDENCE: float = float(os.getenv("ONBOARDING_EARLY_STOP_CONFIDENCE", "0.8"))
-    ONBOARDING_K: float = float(os.getenv("ONBOARDING_K", "0.1"))
-    ONBOARDING_SIGMA_STEP: float = float(os.getenv("ONBOARDING_SIGMA_STEP", "0.12"))
+    ONBOARDING_K: float = float(os.getenv("ONBOARDING_K", "0.4"))
+    ONBOARDING_SIGMA_STEP: float = float(os.getenv("ONBOARDING_SIGMA_STEP", "0.20"))
 
     # Recommendation weights
     LAMBDA_CUISINE: float = float(os.getenv("LAMBDA_CUISINE", "0.2"))

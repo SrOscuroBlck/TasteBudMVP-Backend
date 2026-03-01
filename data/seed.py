@@ -33,8 +33,8 @@ def seed():
             s.add(MenuItem(restaurant_id=it["restaurant_id"], name=it["name"], description="", ingredients=it["ingredients"], allergens=[], dietary_tags=it.get("dietary_tags", []), cuisine=it.get("cuisine", []), price=it.get("price"), features=feats, provenance={"source": "ingested"}, inference_confidence=1.0))
 
         pop = PopulationStats(
-            axis_prior_mean={"sweet":0.4,"sour":0.4,"salty":0.5,"bitter":0.3,"umami":0.6,"spicy":0.3,"fattiness":0.5,"acidity":0.4,"crunch":0.4,"temp_hot":0.6},
-            axis_prior_sigma={k:0.5 for k in ["sweet","sour","salty","bitter","umami","spicy","fattiness","acidity","crunch","temp_hot"]},
+            axis_prior_mean={"sweet":0.4,"sour":0.4,"salty":0.5,"bitter":0.3,"umami":0.6,"fatty":0.5,"spicy":0.3},
+            axis_prior_sigma={k:0.5 for k in ["sweet","sour","salty","bitter","umami","fatty","spicy"]},
             cuisine_prior={"Italian":0.6,"Mexican":0.5},
             item_popularity_global={},
             item_popularity_by_restaurant={},

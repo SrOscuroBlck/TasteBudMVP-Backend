@@ -17,6 +17,7 @@ from scripts.migrations.migrate_fix_permanently_excluded_items_type import fix_p
 from scripts.migrations.migrate_add_feedback_indexes import add_feedback_performance_indexes
 from scripts.migrations.migrate_add_course_cuisine import add_course_and_cuisine_columns
 from scripts.migrations.migrate_add_ingredient_penalties import add_ingredient_penalties_column
+from scripts.migrations.migrate_add_onboarding_choices import add_onboarding_choices_column
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -41,7 +42,8 @@ async def lifespan(app: FastAPI):
     fix_permanently_excluded_items_type()  # Fix TEXT -> JSONB conversion
     add_feedback_performance_indexes()
     add_course_and_cuisine_columns()  # Add meal type filtering columns
-    add_ingredient_penalties_column()  # Add ingredient-level learning for cross-restaurant feedback
+    add_ingredient_penalties_column()
+    add_onboarding_choices_column()
     
     # Load FAISS index for similarity search
     faiss_service = FAISSService()
